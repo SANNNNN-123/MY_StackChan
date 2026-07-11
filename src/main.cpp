@@ -5,8 +5,89 @@
 // X (yaw):   -1280 .. 1280  (-128 deg .. 128 deg)
 // Y (pitch): 0 .. 900       (0 deg .. 90 deg)
 
+static constexpr uint32_t DISPLAY_INTERVAL_MS = 250;
+
 static int clampX(int v) { return max(-1280, min(1280, v)); }
 static int clampY(int v) { return max(0, min(900, v)); }
+
+static const char *chargeStatusText(m5::Power_Class::is_charging_t state) {
+  switch (state) {
+    case m5::Power_Class::is_charging:
+      return "Charging";
+    case m5::Power_Class::is_discharging:
+      return "Discharging";
+    default:
+      return "Unknown";
+  }
+}
+
+static void drawSeparator(LGFX_Device &display, int y) {
+  display.drawFastHLine(0, y, display.width(), TFT_DARKGREY);
+}
+
+static constexpr uint8_t DISPLAY_TEXT_SIZE = 2;
+static constexpr int DISPLAY_LINE_H = 8 * DISPLAY_TEXT_SIZE;
+
+static void drawDashboard() {
+  int32_t level = M5.Power.getBatteryLevel();
+  auto charge_state = M5.Power.isCharging();
+  float voltage = M5StackChan.getBatteryVoltage();
+  float current_ma = M5StackChan.getBatteryCurrent() * 1000.0f;
+  float yaw_deg = M5StackChan.Motion.getCurrentXAngle() / 10.0f;
+  float pitch_deg = M5StackChan.Motion.getCurrentYAngle() / 10.0f;
+  bool moving = M5StackChan.Motion.isMoving();
+
+  auto &display = M5StackChan.Display();
+  display.fillScreen(TFT_BLACK);
+  display.setTextSize(DISPLAY_TEXT_SIZE);
+
+  int y = 4;
+  display.setTextColor(TFT_WHITE, TFT_BLACK);
+  display.setCursor(0, y);
+  display.println("USB motor");
+
+  y += DISPLAY_LINE_H + 4;
+  drawSeparator(display, y);
+
+  y += 6;
+  display.setCursor(0, y);
+  if (level < 0) {
+    display.setTextColor(TFT_ORANGE, TFT_BLACK);
+    display.printf("Battery: N/A  %s\n", chargeStatusText(charge_state));
+  } else {
+    uint16_t level_color = TFT_GREEN;
+    if (charge_state == m5::Power_Class::is_charging) {
+      level_color = TFT_CYAN;
+    } else if (level <= 20) {
+      level_color = TFT_RED;
+    } else if (level <= 40) {
+      level_color = TFT_YELLOW;
+    }
+    display.setTextColor(level_color, TFT_BLACK);
+    display.printf("Battery: %ld%%  %s\n", (long)level, chargeStatusText(charge_state));
+  }
+
+  y += DISPLAY_LINE_H;
+  display.setTextColor(TFT_WHITE, TFT_BLACK);
+  display.setCursor(0, y);
+  display.printf("%.2fV  %+.0fmA\n", voltage, current_ma);
+
+  y += DISPLAY_LINE_H + 4;
+  drawSeparator(display, y);
+
+  y += 6;
+  display.setCursor(0, y);
+  display.printf("X mov: %.1f deg\n", yaw_deg);
+
+  y += DISPLAY_LINE_H;
+  display.setCursor(0, y);
+  display.printf("Y mov: %.1f deg\n", pitch_deg);
+
+  y += DISPLAY_LINE_H;
+  display.setTextColor(moving ? TFT_YELLOW : TFT_GREEN, TFT_BLACK);
+  display.setCursor(0, y);
+  display.println(moving ? "Moving" : "Idle");
+}
 
 static void printHelp() {
   Serial.println("StackChan USB motor control");
@@ -83,9 +164,7 @@ void setup() {
   delay(1500);
 
   M5StackChan.begin();
-  M5StackChan.Display().setTextSize(2);
-  M5StackChan.Display().setTextColor(TFT_WHITE);
-  M5StackChan.Display().printf("USB motor\nready\n");
+  drawDashboard();
 
   Serial.println();
   Serial.println("--- StackChan USB Motor Ready ---");
@@ -94,6 +173,13 @@ void setup() {
 
 void loop() {
   M5StackChan.update();
+
+  static uint32_t last_display_ms = 0;
+  uint32_t now = millis();
+  if (now - last_display_ms >= DISPLAY_INTERVAL_MS) {
+    last_display_ms = now;
+    drawDashboard();
+  }
 
   static char line[96];
   static size_t len = 0;
