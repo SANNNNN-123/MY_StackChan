@@ -20,7 +20,7 @@ Update `upload_port` in `platformio.ini` if your device is not `/dev/ttyACM0`.
 
 **CLI**
 ```bash
-python3 move.py 30 45          # yaw 30°, pitch 45°
+python3 move.py 30 45          # X mov 30°, Y mov 45°
 python3 move.py 0 0 --home
 python3 move.py 0 0 --status
 ```

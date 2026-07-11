@@ -206,8 +206,8 @@
         </div>
       </div>
       <div class="values">
-        <div class="value-box"><span>Yaw</span><strong id="yawVal">0.0°</strong></div>
-        <div class="value-box"><span>Pitch</span><strong id="pitchVal">45.0°</strong></div>
+        <div class="value-box"><span>X mov</span><strong id="yawVal">0.0°</strong></div>
+        <div class="value-box"><span>Y mov</span><strong id="pitchVal">45.0°</strong></div>
         <div class="value-box"><span>Dir</span><strong id="dirVal">C</strong></div>
       </div>
     </section>
@@ -407,7 +407,7 @@
       try {
         const data = await api("/api/status");
         updateAngleDisplay(data.yaw, data.pitch);
-        setStatus(`Position: yaw ${data.yaw.toFixed(1)}°, pitch ${data.pitch.toFixed(1)}°`, true);
+        setStatus(`Position: X ${data.yaw.toFixed(1)}°, Y ${data.pitch.toFixed(1)}°`, true);
       } catch (err) {
         setStatus(err.message, false);
       }

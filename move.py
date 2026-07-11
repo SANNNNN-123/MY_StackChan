@@ -9,8 +9,8 @@ import serial
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Move StackChan head over USB serial")
-    parser.add_argument("x", type=float, help="yaw in degrees (left/right)")
-    parser.add_argument("y", type=float, help="pitch in degrees (up/down, 0-90)")
+    parser.add_argument("x", type=float, help="X mov in degrees")
+    parser.add_argument("y", type=float, help="Y mov in degrees (0-90)")
     parser.add_argument("--port", default="/dev/ttyACM0")
     parser.add_argument("--home", action="store_true", help="go home instead of moving")
     parser.add_argument("--status", action="store_true", help="print current angles")

@@ -154,7 +154,7 @@ class StackChanUI(tk.Tk):
 
       subtitle = ttk.Label(
           self.outer,
-          text="Yaw: left/right   Pitch: up/down",
+          text="X mov and Y mov head control",
           style="Subtitle.TLabel",
       )
       subtitle.pack(anchor=tk.W, pady=(4, 16))
@@ -187,7 +187,7 @@ class StackChanUI(tk.Tk):
 
       self._add_slider(
           controls,
-          "Yaw (degrees)",
+          "X mov (degrees)",
           self.yaw_var,
           YAW_MIN,
           YAW_MAX,
@@ -195,7 +195,7 @@ class StackChanUI(tk.Tk):
       )
       self._add_slider(
           controls,
-          "Pitch (degrees)",
+          "Y mov (degrees)",
           self.pitch_var,
           PITCH_MIN,
           PITCH_MAX,
