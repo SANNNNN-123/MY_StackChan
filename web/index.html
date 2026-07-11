@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>StackChan Joystick</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #12151c;
+      --panel: #1c2230;
+      --text: #eef2ff;
+      --muted: #9aa7bd;
+      --accent: #4f8cff;
+      --ok: #3ecf8e;
+      --err: #ff6b6b;
+      --border: #2d3748;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: system-ui, -apple-system, sans-serif;
+      background: radial-gradient(circle at top, #1a2333, var(--bg));
+      color: var(--text);
+      display: flex;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    main {
+      width: min(640px, 100%);
+      display: grid;
+      gap: 16px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 1.6rem;
+    }
+
+    .subtitle {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px;
+    }
+
+    .row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    label {
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    select, button {
+      font: inherit;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #0f1420;
+      color: var(--text);
+      padding: 10px 14px;
+    }
+
+    button {
+      cursor: pointer;
+      background: #243044;
+    }
+
+    button.primary {
+      background: var(--accent);
+      border-color: #3d74d9;
+      color: white;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    #status {
+      font-size: 0.95rem;
+    }
+
+    #status.ok { color: var(--ok); }
+    #status.err { color: var(--err); }
+
+    #joyDiv {
+      width: 280px;
+      height: 280px;
+      flex-shrink: 0;
+    }
+
+  #joystick {
+      border: 1px solid var(--border);
+      border-radius: 50%;
+    }
+
+    .controls-row {
+      display: flex;
+      gap: 20px;
+      justify-content: center;
+      align-items: flex-start;
+      flex-wrap: wrap;
+      margin-top: 8px;
+    }
+
+    .pad-panel {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .pad-title {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+
+    .pad-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+    }
+
+    .pad-grid button {
+      width: 52px;
+      height: 52px;
+      padding: 0;
+      font-size: 1.2rem;
+      line-height: 1;
+    }
+
+    .pad-grid button.center {
+      font-size: 1rem;
+    }
+
+    .values {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .value-box {
+      background: #0f1420;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px;
+      text-align: center;
+    }
+
+    .value-box span {
+      display: block;
+      color: var(--muted);
+      font-size: 0.8rem;
+      margin-bottom: 4px;
+    }
+
+    .value-box strong {
+      font-size: 1.1rem;
+    }
+
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>WebUI Joystick</h1>
+      <p class="subtitle">Drag to move the head. Release to return to center.</p>
+    </header>
+
+    <section class="panel">
+      <div class="row">
+        <label for="port">Port</label>
+        <select id="port"></select>
+        <button id="refreshPorts" type="button">Refresh</button>
+        <button id="connectBtn" class="primary" type="button">Connect</button>
+      </div>
+      <p id="status" class="err">Disconnected</p>
+    </section>
+
+    <section class="panel">
+      <div class="controls-row">
+        <div id="joyDiv"></div>
+        <div class="pad-panel">
+          <p class="pad-title">Quick Pad</p>
+          <div class="pad-grid" id="padGrid"></div>
+        </div>
+      </div>
+      <div class="values">
+        <div class="value-box"><span>Yaw</span><strong id="yawVal">0.0°</strong></div>
+        <div class="value-box"><span>Pitch</span><strong id="pitchVal">45.0°</strong></div>
+        <div class="value-box"><span>Dir</span><strong id="dirVal">C</strong></div>
+      </div>
+    </section>
+
+    <section class="panel row">
+      <button id="homeBtn" type="button">Home</button>
+      <button id="statusBtn" type="button">Read Status</button>
+    </section>
+  </main>
+
+  <script src="joy.js"></script>
+  <script>
+    const YAW_MAX = 128;
+    const PITCH_CENTER = 45;
+    const PITCH_RANGE = 45;
+    const SEND_INTERVAL_MS = 40;
+
+    const PAD_BUTTONS = [
+      ["↖", -30, 60],
+      ["↑", 0, 75],
+      ["↗", 30, 60],
+      ["←", -45, 45],
+      ["●", 0, 45],
+      ["→", 45, 45],
+      ["↙", -30, 20],
+      ["↓", 0, 15],
+      ["↘", 30, 20],
+    ];
+
+    const portEl = document.getElementById("port");
+    const statusEl = document.getElementById("status");
+    const connectBtn = document.getElementById("connectBtn");
+    const yawVal = document.getElementById("yawVal");
+    const pitchVal = document.getElementById("pitchVal");
+    const dirVal = document.getElementById("dirVal");
+
+    let connected = false;
+    let lastSentAt = 0;
+    let lastYaw = null;
+    let lastPitch = null;
+
+    function stickToAngles(stick) {
+      const x = Number(stick.x);
+      const y = Number(stick.y);
+      const yaw = (x / 100) * YAW_MAX;
+      const pitch = PITCH_CENTER + (y / 100) * PITCH_RANGE;
+      return {
+        yaw: Math.max(-YAW_MAX, Math.min(YAW_MAX, yaw)),
+        pitch: Math.max(0, Math.min(90, pitch)),
+        dir: stick.cardinalDirection,
+      };
+    }
+
+    function updateAngleDisplay(yaw, pitch, dir = "C") {
+      yawVal.textContent = `${yaw.toFixed(1)}°`;
+      pitchVal.textContent = `${pitch.toFixed(1)}°`;
+      dirVal.textContent = dir;
+    }
+
+    async function applyPreset(yaw, pitch) {
+      updateAngleDisplay(yaw, pitch);
+      lastYaw = yaw;
+      lastPitch = pitch;
+      lastSentAt = performance.now();
+      if (!connected) {
+        setStatus("Connect first to move StackChan", false);
+        return;
+      }
+      try {
+        await sendMove(yaw, pitch);
+      } catch (err) {
+        setStatus(err.message, false);
+      }
+    }
+
+    function buildPad() {
+      const padGrid = document.getElementById("padGrid");
+      for (const [label, yaw, pitch] of PAD_BUTTONS) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = label;
+        if (label === "●") {
+          button.classList.add("center");
+        }
+        button.addEventListener("click", () => applyPreset(yaw, pitch));
+        padGrid.appendChild(button);
+      }
+    }
+
+    function setStatus(text, ok) {
+      statusEl.textContent = text;
+      statusEl.className = ok ? "ok" : "err";
+    }
+
+    async function api(path, options = {}) {
+      const response = await fetch(path, {
+        headers: { "Content-Type": "application/json" },
+        ...options,
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Request failed");
+      }
+      return data;
+    }
+
+    async function loadPorts() {
+      const data = await api("/api/ports");
+      portEl.innerHTML = "";
+      for (const port of data.ports) {
+        const option = document.createElement("option");
+        option.value = port;
+        option.textContent = port;
+        portEl.appendChild(option);
+      }
+    }
+
+    async function sendMove(yaw, pitch) {
+      if (!connected) return;
+      await api("/api/move", {
+        method: "POST",
+        body: JSON.stringify({ yaw, pitch }),
+      });
+    }
+
+    function maybeSendMove(yaw, pitch) {
+      const now = performance.now();
+      const changed = yaw !== lastYaw || pitch !== lastPitch;
+      if (!changed && now - lastSentAt < SEND_INTERVAL_MS) {
+        return;
+      }
+      if (now - lastSentAt < SEND_INTERVAL_MS) {
+        return;
+      }
+      lastYaw = yaw;
+      lastPitch = pitch;
+      lastSentAt = now;
+      sendMove(yaw, pitch).catch((err) => setStatus(err.message, false));
+    }
+
+    const joy = new JoyStick("joyDiv", {
+      title: "joystick",
+      width: 280,
+      height: 280,
+      internalFillColor: "#4f8cff",
+      internalStrokeColor: "#1f4ea8",
+      externalStrokeColor: "#3d74d9",
+      internalDrawArrows: true,
+      autoReturnToCenter: true,
+    }, (stick) => {
+      const { yaw, pitch, dir } = stickToAngles(stick);
+      updateAngleDisplay(yaw, pitch, dir);
+      maybeSendMove(yaw, pitch);
+    });
+
+    buildPad();
+
+    connectBtn.addEventListener("click", async () => {
+      try {
+        if (connected) {
+          await api("/api/disconnect", { method: "POST", body: "{}" });
+          connected = false;
+          connectBtn.textContent = "Connect";
+          setStatus("Disconnected", false);
+          return;
+        }
+        await api("/api/connect", {
+          method: "POST",
+          body: JSON.stringify({ port: portEl.value }),
+        });
+        connected = true;
+        connectBtn.textContent = "Disconnect";
+        setStatus(`Connected to ${portEl.value}`, true);
+      } catch (err) {
+        connected = false;
+        connectBtn.textContent = "Connect";
+        setStatus(err.message, false);
+      }
+    });
+
+    document.getElementById("refreshPorts").addEventListener("click", () => {
+      loadPorts().catch((err) => setStatus(err.message, false));
+    });
+
+    document.getElementById("homeBtn").addEventListener("click", async () => {
+      try {
+        await api("/api/home", { method: "POST", body: "{}" });
+        updateAngleDisplay(0, 45);
+        lastYaw = 0;
+        lastPitch = 45;
+      } catch (err) {
+        setStatus(err.message, false);
+      }
+    });
+
+    document.getElementById("statusBtn").addEventListener("click", async () => {
+      try {
+        const data = await api("/api/status");
+        updateAngleDisplay(data.yaw, data.pitch);
+        setStatus(`Position: yaw ${data.yaw.toFixed(1)}°, pitch ${data.pitch.toFixed(1)}°`, true);
+      } catch (err) {
+        setStatus(err.message, false);
+      }
+    });
+
+    loadPorts().catch((err) => setStatus(err.message, false));
+  </script>
+</body>
+</html>
