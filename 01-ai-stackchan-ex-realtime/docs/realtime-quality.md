@@ -66,6 +66,6 @@ If the goal is **“sounds like ChatGPT Realtime”**:
 
 ## Related patches in this experiment
 
-- `0001` — SPIFFS config without microSD (obsolete; upstream has this now)  
-- `0002` — English default role  
-- Further audio fixes (sample rate / logging) may land as `0003` if we keep iterating this stack
+- `0001` — SPIFFS config without microSD (obsolete; upstream has this now)
+- `0002` — English default role
+- `0003` — buffered audio playback to prevent WebSocket callback stalls

@@ -27,7 +27,7 @@
 Upstream prefers YAML on a **microSD**, but current AI_StackChan_Ex already **falls back to SPIFFS** when SD is missing (same flat paths as AtomS3R). We:
 
 1. Put YAML in `firmware/data/` and flash with PlatformIO **`uploadfs`**.
-2. Apply only our English default-role patch (`0002`).
+2. Apply the English default-role patch (`0002`) and realtime audio playback fix (`0003`).
 
 ---
 
@@ -68,6 +68,7 @@ No breadboard wires or ESPHome USB adapters beyond that.
     patches/
     0001-cores3-spiffs-config-fallback.patch  ← obsolete; kept for old upstream
     0002-english-default-role.patch
+    0003-realtime-audio-playback-queue.patch
     scripts/
     bootstrap.sh            ← clone upstream, apply English-role patch
     apply-local-config.sh   ← copy local secrets → firmware/data
@@ -88,7 +89,7 @@ cd 01-ai-stackchan-ex-realtime
 ./scripts/bootstrap.sh
 ```
 
-This clones AI_StackChan_Ex into `upstream/` (if missing), skips the obsolete SPIFFS patch when upstream already has it, and applies `patches/0002-english-default-role.patch`.
+This clones AI_StackChan_Ex into `upstream/` (if missing), skips the obsolete SPIFFS patch when upstream already has it, and applies patches `0002` and `0003`.
 
 ### 2. Create local secrets (never commit)
 
@@ -169,7 +170,7 @@ Details: [docs/decisions.md](./docs/decisions.md).
 
 ## Config / patch summary
 
-Current upstream `load_system_config()` already prefers SD, then SPIFFS flat paths. Patch `0001` is historical only. Patch `0002` switches default LLM/Realtime role text from Japanese to English.
+Current upstream `load_system_config()` already prefers SD, then SPIFFS flat paths. Patch `0001` is historical only. Patch `0002` switches default LLM/Realtime role text from Japanese to English. Patch `0003` moves audio playback off the WebSocket callback into a buffered task.
 
 SPIFFS file layout (via PlatformIO `firmware/data/`):
 
