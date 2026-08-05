@@ -45,6 +45,7 @@ else
 fi
 
 apply_patch "$ROOT/patches/0002-english-default-role.patch"
+apply_patch "$ROOT/patches/0003-realtime-audio-playback-queue.patch"
 
 echo "Bootstrap OK. Next:"
 echo "  1. Create local/SC_SecConfig.yaml from config/*.example"
