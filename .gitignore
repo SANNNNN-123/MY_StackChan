@@ -1,0 +1,32 @@
+# PlatformIO
+**/.pio/
+
+# Python
+**/__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets and local machine-only config
+.env
+**/.env
+**/platformio_local.ini
+
+# AI_StackChan_Ex experiment: secrets + third-party clone (recreated by bootstrap)
+01-ai-stackchan-ex-realtime/local/
+01-ai-stackchan-ex-realtime/upstream/
+
+# Never commit filled secret YAML even if misplaced
+**/SC_SecConfig.yaml
+!**/SC_SecConfig.yaml.example
