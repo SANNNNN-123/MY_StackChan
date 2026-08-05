@@ -27,7 +27,7 @@
 Upstream prefers YAML on a **microSD**, but current AI_StackChan_Ex already **falls back to SPIFFS** when SD is missing (same flat paths as AtomS3R). We:
 
 1. Put YAML in `firmware/data/` and flash with PlatformIO **`uploadfs`**.
-2. Apply the English default-role patch (`0002`), realtime audio playback fix (`0003`), and Malay language patch (`0004`).
+2. Apply the language, audio playback, and serial logging patches (`0002`–`0005`).
 
 ---
 
@@ -70,6 +70,7 @@ No breadboard wires or ESPHome USB adapters beyond that.
     0002-english-default-role.patch
     0003-realtime-audio-playback-queue.patch
     0004-malay-default-role.patch
+    0005-reduce-realtime-serial-logging.patch
     scripts/
     bootstrap.sh            ← clone upstream, apply English-role patch
     apply-local-config.sh   ← copy local secrets → firmware/data
@@ -90,7 +91,7 @@ cd 01-ai-stackchan-ex-realtime
 ./scripts/bootstrap.sh
 ```
 
-This clones AI_StackChan_Ex into `upstream/` (if missing), skips the obsolete SPIFFS patch when upstream already has it, and applies patches `0002` through `0004`.
+This clones AI_StackChan_Ex into `upstream/` (if missing), skips the obsolete SPIFFS patch when upstream already has it, and applies patches `0002` through `0005`.
 
 ### 2. Create local secrets (never commit)
 
@@ -171,7 +172,7 @@ Details: [docs/decisions.md](./docs/decisions.md).
 
 ## Config / patch summary
 
-Current upstream `load_system_config()` already prefers SD, then SPIFFS flat paths. Patch `0001` is historical only. Patch `0002` sets the initial English role, patch `0003` moves audio playback off the WebSocket callback into a buffered task, and patch `0004` changes the role to Malay.
+Current upstream `load_system_config()` already prefers SD, then SPIFFS flat paths. Patch `0001` is historical only. Patch `0002` sets the initial English role, patch `0003` adds buffered playback, a 200 ms prebuffer, 16→24 kHz input resampling, and rate-limited audio diagnostics, patch `0004` changes the role to Malay, and patch `0005` removes high-volume WebSocket logging.
 
 SPIFFS file layout (via PlatformIO `firmware/data/`):
 

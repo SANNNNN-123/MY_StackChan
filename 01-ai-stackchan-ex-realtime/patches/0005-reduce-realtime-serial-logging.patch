@@ -1,0 +1,49 @@
+diff --git a/firmware/src/llm/ChatGPT/RealtimeChatGPT.cpp b/firmware/src/llm/ChatGPT/RealtimeChatGPT.cpp
+index 5369b06..8a95efb 100644
+--- a/firmware/src/llm/ChatGPT/RealtimeChatGPT.cpp
++++ b/firmware/src/llm/ChatGPT/RealtimeChatGPT.cpp
+@@ -154,7 +154,6 @@ static void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
+ 			break;
+ 		case WStype_TEXT:
+ 			//Serial.printf("[WSc] get text: %s\n", payload);
+-			Serial.printf("[WSc] text size: %d\n", strlen((char*)payload));
+ 
+             error = deserializeJson(p_this->msgDoc, payload);
+             if (error) {
+@@ -162,7 +161,6 @@ static void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
+             }
+ 
+             msgType = p_this->msgDoc["type"].as<String>();
+-            Serial.printf("[WSc] text type: %s\n", msgType.c_str());
+ 
+             if(msgType.equals("session.updated")){
+                 Serial.printf("[WSc] payload: %s\n", payload);
+@@ -186,7 +184,6 @@ static void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
+ #ifndef REALTIME_API_WITH_TTS            
+             else if(msgType.equals("response.output_audio_transcript.delta")){
+                 delta = p_this->msgDoc["delta"].as<String>();
+-                Serial.printf("[WSc] delta: %s\n", delta.c_str());
+             }
+             else if(msgType.equals("response.output_audio.delta")){
+                 delta = p_this->msgDoc["delta"].as<String>();
+@@ -207,7 +204,6 @@ static void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
+             }
+ #endif
+             else if(msgType.equals("response.done")){
+-                Serial.printf("[WSc] response.done payload: %s\n", payload);
+                 int outputNum = p_this->msgDoc["response"]["output"].size();
+                 Serial.printf("output num: %d\n", outputNum);
+                 bool isFuncCall = false;
+diff --git a/firmware/src/llm/Gemini/GeminiLive.cpp b/firmware/src/llm/Gemini/GeminiLive.cpp
+index 0d270a3..d00d223 100644
+--- a/firmware/src/llm/Gemini/GeminiLive.cpp
++++ b/firmware/src/llm/Gemini/GeminiLive.cpp
+@@ -174,7 +174,6 @@ static void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
+             }
+ 			break;
+ 		case WStype_TEXT:
+-			Serial.printf("[WSc] get text: %s\n", payload);
+ 			//Serial.printf("[WSc] text size: %d\n", strlen((char*)payload));
+ 			break;
+ 		case WStype_BIN:
+

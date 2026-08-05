@@ -20,14 +20,14 @@ So yes: website voice will feel far better. That is not your imagination.
 
 ## Concrete bugs / design smells in this firmware
 
-1. **Sample rate mismatch (upstream)**  
-   Mic recorded at **16 kHz** (`RT_REC_SAMPLE_RATE`) while the Realtime session advertises **24 kHz** PCM. Model hears wrong-speed audio → bad ASR and weird turns.
+1. **Sample rate mismatch (fixed in `0003`)**  
+   Mic capture remains at 16 kHz, but the client now linearly resamples input to the 24 kHz format advertised to Realtime.
 
-2. **Playback blocks the WebSocket task**  
-   `streamAudioDelta()` waits for the speaker to finish **before** the event loop can process the next frames. That causes jitter, stalls, and “thinking / interrupting itself” vibes.
+2. **Playback blocks the WebSocket task (fixed in `0003`)**  
+   Audio chunks now enter a buffered playback task, with a 200 ms prebuffer before playback begins.
 
-3. **Huge Serial logging on every audio delta**  
-   Logging base64 sizes / payload sizes on large frames stalls the same loop that must keep audio moving.
+3. **Huge Serial logging on every audio delta (fixed in `0003`)**  
+   Per-chunk logging was removed. Audio counters are reported at most once every five seconds.
 
 4. **Tool dump on every session**  
    Dozens of function-calling tools (alarms, volume, Japanese descriptions…) inflate every session and invite the model to tool-call instead of just talking.
@@ -68,5 +68,6 @@ If the goal is **“sounds like ChatGPT Realtime”**:
 
 - `0001` — SPIFFS config without microSD (obsolete; upstream has this now)
 - `0002` — English default role
-- `0003` — buffered audio playback to prevent WebSocket callback stalls
+- `0003` — buffered audio playback, 200 ms prebuffer, 16→24 kHz input resampling, and rate-limited diagnostics
 - `0004` — Malay default role
+- `0005` — remove high-volume WebSocket serial logging
