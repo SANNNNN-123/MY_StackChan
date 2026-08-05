@@ -1,0 +1,5 @@
+# Local secrets (Wi-Fi, API keys) — never commit
+local/
+
+# Cloned third-party firmware tree — recreated by scripts/bootstrap.sh
+upstream/
