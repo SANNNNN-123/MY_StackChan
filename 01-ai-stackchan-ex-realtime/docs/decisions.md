@@ -47,7 +47,7 @@ Copy-to-SD samples in upstream still show Core2 PWM defaults; do not use those b
 - Touch forehead to start/stop listening
 - Confirmed working on first bring-up: WebSocket connect, `session.updated`, PCM audio deltas, transcript events
 
-## Language (English vs Japanese)
+## Language (Malay vs English/Japanese)
 
 Upstream hardcodes Japanese in:
 
@@ -56,7 +56,7 @@ Upstream hardcodes Japanese in:
 
 That is why first boot said **こんにちは** (Japanese “hello”), which can look “Chinese-ish” on a small CJK font. It is **not** proof Realtime failed.
 
-We ship `patches/0002-english-default-role.patch` so defaults ask for natural English. Role can also be edited later via the device web UI at `http://<robot-ip>/` (personalize). Re-flashing SPIFFS wipes the stored system prompt so the new default is applied.
+We ship `patches/0002-english-default-role.patch` followed by `patches/0004-malay-default-role.patch`, so the final defaults ask for natural Malay. Role can also be edited later via the device web UI at `http://<robot-ip>/` (personalize). Re-flashing SPIFFS wipes the stored system prompt so the new default is applied.
 
 ## MCP (deferred for first boot)
 

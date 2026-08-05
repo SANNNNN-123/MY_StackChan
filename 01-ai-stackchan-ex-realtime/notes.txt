@@ -1,0 +1,28 @@
+# 1. No need for ESP-IDF. Use PlatformIO only.
+cd /01-ai-stackchan-ex-realtime
+
+# 2. Bootstrap (safe if already done)
+./scripts/bootstrap.sh
+
+# 3. Confirm secrets still exist (Wi‑Fi + OpenAI key)
+#    edit if needed: local/SC_SecConfig.yaml
+
+# 4. Copy config into firmware/data
+./scripts/apply-local-config.sh
+
+# 5. Plug StackChan in (USB-C data cable), then build + flash app + SPIFFS
+./scripts/flash.sh
+
+
+
+#wifi connection 
+
+cd 01-ai-stackchan-ex-realtime
+./scripts/apply-local-config.sh
+cd upstream/firmware
+pio run -e m5stack-cores3-realtime -t uploadfs
+
+
+cd 01-ai-stackchan-ex-realtime
+  ./scripts/apply-local-config.sh
+  ./scripts/flash.sh

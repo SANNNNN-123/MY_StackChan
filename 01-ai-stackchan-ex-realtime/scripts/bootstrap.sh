@@ -44,8 +44,13 @@ else
   apply_patch "$ROOT/patches/0001-cores3-spiffs-config-fallback.patch"
 fi
 
-apply_patch "$ROOT/patches/0002-english-default-role.patch"
+if grep -q 'clear, natural Malay' firmware/src/llm/ChatGPT/RealtimeChatGPT.cpp 2>/dev/null; then
+  echo "Skipping 0002-english-default-role.patch (Malay role already installed)"
+else
+  apply_patch "$ROOT/patches/0002-english-default-role.patch"
+fi
 apply_patch "$ROOT/patches/0003-realtime-audio-playback-queue.patch"
+apply_patch "$ROOT/patches/0004-malay-default-role.patch"
 
 echo "Bootstrap OK. Next:"
 echo "  1. Create local/SC_SecConfig.yaml from config/*.example"

@@ -69,3 +69,4 @@ If the goal is **“sounds like ChatGPT Realtime”**:
 - `0001` — SPIFFS config without microSD (obsolete; upstream has this now)
 - `0002` — English default role
 - `0003` — buffered audio playback to prevent WebSocket callback stalls
+- `0004` — Malay default role
