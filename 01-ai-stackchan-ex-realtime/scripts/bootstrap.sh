@@ -44,7 +44,7 @@ else
   apply_patch "$ROOT/patches/0001-cores3-spiffs-config-fallback.patch"
 fi
 
-if grep -q 'clear, natural Malay' firmware/src/llm/ChatGPT/RealtimeChatGPT.cpp 2>/dev/null; then
+if grep -q 'Bahasa Melayu Malaysia' firmware/src/llm/ChatGPT/RealtimeChatGPT.cpp 2>/dev/null; then
   echo "Skipping 0002-english-default-role.patch (Malay role already installed)"
 else
   apply_patch "$ROOT/patches/0002-english-default-role.patch"
@@ -52,6 +52,27 @@ fi
 apply_patch "$ROOT/patches/0003-realtime-audio-playback-queue.patch"
 apply_patch "$ROOT/patches/0004-malay-default-role.patch"
 apply_patch "$ROOT/patches/0005-reduce-realtime-serial-logging.patch"
+
+# Select the original OpenAI Realtime audio model. Keep this idempotent so a
+# rerun after a partial bootstrap restores the original model if necessary.
+REALTIME_FILE="firmware/src/llm/ChatGPT/RealtimeChatGPT.cpp"
+if grep -q 'gpt-realtime-2.1' "$REALTIME_FILE" 2>/dev/null; then
+  sed -i 's/gpt-realtime-2.1/gpt-realtime/g' "$REALTIME_FILE"
+  echo "Selected gpt-realtime"
+fi
+
+# CoreS3 shares an I2S peripheral between mic and speaker. Do not restart the
+# mic while the buffered playback task still owns queued audio.
+if grep -q 'while (M5.Speaker.isPlaying())' "$REALTIME_FILE" 2>/dev/null; then
+  sed -i 's/while (M5.Speaker.isPlaying())/while (M5.Speaker.isPlaying() || uxQueueMessagesWaiting(p_this->audioReadyQueue) > 0)/' "$REALTIME_FILE"
+  echo "Added audio queue drain before microphone restart"
+fi
+
+AUDIO_HEADER="firmware/src/llm/RealtimeLLMBase.h"
+if grep -q 'RT_AUDIO_CHUNK_SIZE (16 \* 1024)' "$AUDIO_HEADER" 2>/dev/null; then
+  sed -i 's/RT_AUDIO_CHUNK_SIZE (16 \* 1024)/RT_AUDIO_CHUNK_SIZE (64 * 1024)/' "$AUDIO_HEADER"
+  echo "Expanded Realtime audio chunk buffer to 64 KB"
+fi
 
 echo "Bootstrap OK. Next:"
 echo "  1. Create local/SC_SecConfig.yaml from config/*.example"

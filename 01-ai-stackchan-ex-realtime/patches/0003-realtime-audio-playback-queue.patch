@@ -80,7 +80,7 @@ index 278ac85..3711a8c 100644
  }
  
  void RealtimeLLMBase::startRealtimeRecord()
-@@ -217,15 +239,83 @@ void RealtimeLLMBase::hexdump(const void *mem, uint32_t len, uint8_t cols) {
+@@ -217,15 +239,84 @@ void RealtimeLLMBase::hexdump(const void *mem, uint32_t len, uint8_t cols) {
  
  void RealtimeLLMBase::streamAudioDelta(String& delta)
  {
@@ -191,7 +191,7 @@ index b12dcbe..2b00b3a 100644
  #define RT_REC_SAMPLE_RATE  (16000)
 +#define RT_AUDIO_SAMPLE_RATE (24000)
 +#define RT_AUDIO_PREBUFFER_MS (200)
-+#define RT_AUDIO_CHUNK_SIZE (16 * 1024)
++#define RT_AUDIO_CHUNK_SIZE (64 * 1024)
 +#define RT_AUDIO_QUEUE_LENGTH (32)
  
  #ifdef REALTIME_API_RECORD_TEST
