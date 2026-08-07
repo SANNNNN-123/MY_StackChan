@@ -1,0 +1,162 @@
+# Realtime API
+
+- [概要](#概要)
+- [ビルド方法](#ビルド方法)
+- [設定方法① Web UIによる設定（推奨）](#設定方法-web-uiによる設定推奨)
+- [設定方法② SDカードによる設定](#設定方法-sdカードによる設定)
+  - [YAMLの設定① (Wi-Fi、APIキー)](#yamlの設定-wi-fiapiキー)
+  - [YAMLの設定② (LLM)](#yamlの設定-llm)
+  - [YAMLの設定③ (サーボ)](#yamlの設定-サーボ)
+- [使い方](#使い方)
+  - [リアルタイム会話](#リアルタイム会話)
+  - [サーボ動作の停止、再開](#サーボ動作の停止再開)
+- [Function Calling及びMCP](#function-calling及びmcp)
+- [TTSとの組み合わせ (OpenAI Realtimeのみ)](#ttsとの組み合わせ-openai-realtimeのみ)
+  - [設定方法](#設定方法)
+
+## 概要
+Realtime APIを利用することで、従来よりもリアルタイムに近い応答速度で会話を楽しむことができます。OpenAI Realtime API 及び Gemini Live APIに対応しています。  
+
+## ビルド方法
+下図のように、VSCode(PlatformIO)のGUIで"env:m5stack-xxx-realtime"を選択してビルド＆書き込みを実行します。  
+
+> Note:  
+> PlatformIOで初めてプロジェクトを開いてビルドするまでの手順は、[基本的な利用方法 2.2.ビルド＆書き込み](basic_usage.md#22-ビルド書き込み)を参照ください。
+
+![](../images/realtime_api_select_env.png)
+
+
+
+## 設定方法① Web UIによる設定（推奨）
+SDカード不要の、Web UIによる設定方法です。次の手順で設定します。
+
+① M5Stackの電源ON。
+
+② 初回はWi-Fi未設定のため、次のようなモード選択画面が表示される。  
+　「Config AP」を選択してAPモードで起動する。
+
+- Config AP : APモードで起動しWeb UIで設定を行うモード  
+- Offline : オフラインのまま起動するモード
+
+　![](../images/ap_mode_select.png)
+
+③ APモードで起動すると次のような画面になるので、表示されているSSIDにスマートフォンやPCで接続し、表示されているURL（もしくはQRコード）によりConfigページにアクセスする。
+
+　![](../images/ap_mode_ssid_and_url.png)
+
+④ Configページの各タブで設定を入力し、Saveボタンで保存する。
+> Note:  
+> 全タブ入力後にSaveボタンを1度押せば、全タブの内容が保存されます。
+
+- Wi-Fi：接続先Wi-FiアクセスポイントのSSIDとパスワードの設定
+- AI Service：利用するリアルタイムAPIの選択、及びAPIキーの設定
+- Servo：サーボの種類、ピン番号の設定
+- MCPs(Option)：MCPサーバーの設定（任意）  
+
+　![](../images/config_page.png)
+
+⑤ RestartボタンでM5Stackを再起動すると設定が反映される。
+
+## 設定方法② SDカードによる設定
+従来のようにSDカードのYAMLファイルで設定する方法です。
+以下の3種類のYAMLファイルをSDカードに保存し、M5Stackのスロットに挿入して電源を入れなおすことで反映されます。
+
+> Note:  
+> AtomS3RはSDカード非対応のため、SPIFFSにYAMLファイルを書き込みます。書き込み方法は[こちら](./atoms3r.md)を参照ください。
+
+### YAMLの設定① (Wi-Fi、APIキー)
+SDカードフォルダ：/yaml  
+ファイル名：SC_SecConfig.yaml
+
+Wi-FiパスワードとAPIキー(aiservice)を設定します。STTとTTSは使用しないため設定不要です。
+
+```yaml
+wifi:
+  ssid: "********"
+  password: "********"
+
+apikey:
+  stt: "********"       # ApiKey of SpeechToText Service (OpenAI Whisper/ Google Cloud STT 何れかのキー)
+  aiservice: "********" # ApiKey of AIService (OpenAI ChatGPT / Gemini)
+  tts: "********"       # ApiKey of TextToSpeech Service (VoiceVox / ElevenLabs / OpenAI 何れかのキー)
+```
+
+### YAMLの設定② (LLM)
+SDカードフォルダ：/app/AiStackChanEx  
+ファイル名：SC_ExConfig.yaml
+
+LLMとして「0:ChatGPT」または「3:Gemini」を選択します。  
+enableMemory=true にすると長期記憶（SPIFFSに要約を記録）が有効になります。  
+長期記憶に関する詳細は[基本的な使用方法](basic_usage.md)の 3.パーソナライズ を参照ください。
+
+```yaml
+llm:
+  type: 0               # 0:ChatGPT  1:ModuleLLM  2:ModuleLLM(Function Calling)  3:Gemini
+  enableMemory: true    # true で長期記憶を有効化
+```
+
+### YAMLの設定③ (サーボ)
+SDカードフォルダ：/yaml  
+ファイル名：SC_BasicConfig.yaml
+
+サーボの種類、ポート等を[基本的な利用方法 2.1.YAMLによる初期設定](./basic_usage.md#sc_basicconfigyaml)に従い設定します。サーボを使わない場合は省略して問題ありません。
+
+
+## 使い方
+### リアルタイム会話
+① M5Coreを起動してアバターが表示されたあと、吹き出しの文字が"Connecting..."から"Please touch"に変わります。
+
+② M5Core画面の上部（アバターの額のあたり）をタッチすると吹き出しが"Listening..."に変わり、リアルタイム会話を開始します（もう一度タッチするとリアルタイム会話を停止します）。
+
+> Note:  
+> AtomS3Rは画面自体が物理ボタンになっているため、画面中央を少し強めに押し込んでください。
+
+③ 30秒以上会話が無い状態が続くとリアルタイム会話を終了し、吹き出しが"Please touch"に戻ります。
+
+### サーボ動作の停止、再開
+M5Core画面の中央付近をタッチするとサーボによる動作の停止、再開ができます。
+
+## Function Calling及びMCP
+Function Callingと、Function Callingを応用して実装したMCPも使用可能です。Function Callingはデフォルトで時計、アラーム機能が有効になっており、「今何時？」や「3分のアラームをセットして」という要求に応えることができます。MCPはLinux PCでMCPサーバを起動し、YAMLで接続先MCPサーバの設定をする必要があります。詳細は[こちら](mcp.md)を参照ください。
+
+## TTSとの組み合わせ (OpenAI Realtimeのみ)
+VOICEVOX等（※）のTTSを組み合わせることで、お好みの声に変更することができます（ただし、応答の遅延は若干増えます）。
+
+> ※動作確認はVOICEVOXとAquesTalkで行っています。デバイス毎の対応状況は次の通りです（SRAM容量などによる制約）
+> |デバイス|VOICEVOX|AquesTalk|
+> |---|---|---|
+> |Core2|×|〇|
+> |CoreS3|〇|〇|
+> |AtomS3R|×|×| 
+
+> Note:  
+> 技術的には、Realtime APIの出力をストリーミングのテキストのみに設定し、「。」、「？」、「！」の区切り文字を受信したタイミングでTTSに渡しています。TTSで発話しながら次の区切り文字までのテキストを受信することで、次のテキストの発話までの遅延を抑えています。
+
+### 設定方法
+platformio.iniの[realtime_api]セクションのbuild_flagsにDREALTIME_API_WITH_TTSを追加してビルド、書き込み。
+
+```yaml
+[realtime_api]
+build_flags = 
+	-DREALTIME_API
+	-DREALTIME_API_WITH_TTS
+```
+
+SDカードの/app/AiStackChanEx/SC_ExConfig.yaml で使用したいTTSを設定。
+> 動作確認はVOICEVOXとAquesTalkで行っています。AquelTalkを使用する場合は別途[こちら](./tts_aquestalk.md)に記載しているセットアップも必要です。
+
+```yaml
+tts:
+  type: 0                            # 0:VOICEVOX  1:ElevenLabs  2:OpenAI TTS  3:AquesTalk 4:ModuleLLM
+
+  model: ""                          # VOICEVOX, AquesTalk (modelは未対応)
+  #model: "eleven_multilingual_v2"    # ElevenLabs
+  #model: "tts-1"                     # OpenAI TTS
+  #model: "melotts-ja-jp"             # ModuleLLM (日本語)  ※モデル指定なしの場合は英語
+
+  voice: "3"                         # VOICEVOX (ずんだもん)
+  #voice: "AZnzlk1XvdvUeBnXmlld"      # ElevenLabs
+  #voice: "alloy"                     # OpenAI TTS
+  #voice: ""                          # AquesTalk (voiceは未対応)
+
+```
