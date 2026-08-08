@@ -1,0 +1,348 @@
+"""Remote model catalog — fetches available models from this repo.
+
+The catalog lives in the revos/models/ directory of this repository.
+Team members add YAML manifests to the repo; users discover and
+pull them without upgrading the package.
+
+Default catalog: revolab/revospeech on GitHub
+Override with: REVOS_CATALOG_REPO env var or config.yaml
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+from .config import load_config
+from .registry.manifest import ModelManifest, load_manifest
+from .registry.status import check_model
+
+logger = logging.getLogger(__name__)
+
+# Default: this repo on GitHub
+DEFAULT_CATALOG_REPO = "revolab/revospeech"
+
+# GitHub API base
+_GITHUB_API = "https://api.github.com/repos"
+
+# Local user models directory
+_USER_MODELS_DIR = Path.home() / ".config" / "revospeech" / "models"
+
+# Catalog cache
+_CACHE_FILE = Path.home() / ".cache" / "revospeech" / "catalog_cache.json"
+_CACHE_TTL = 3600  # 1 hour in seconds
+
+
+def get_catalog_repo() -> str:
+    """Get the catalog repository (GitHub owner/repo format).
+
+    Checks in order:
+      1. REVOS_CATALOG_REPO environment variable
+      2. ~/.config/revospeech/config.yaml (catalog_repo key)
+      3. Default: revolab/revospeech
+
+    Returns:
+        GitHub repository in owner/repo format.
+    """
+    env_repo = os.environ.get("REVOS_CATALOG_REPO")
+    if env_repo:
+        return env_repo
+
+    config = load_config()
+    if "catalog_repo" in config:
+        return config["catalog_repo"]
+
+    return DEFAULT_CATALOG_REPO
+
+
+def _urlopen_with_retry(
+    url: str,
+    headers: dict[str, str] | None = None,
+    retries: int = 3,
+    timeout: int = 10,
+    backoff: float = 1.0,
+) -> bytes:
+    """Open a URL with retry and timeout."""
+    last_error: Exception | None = None
+    for attempt in range(retries):
+        try:
+            req = urllib.request.Request(url, headers=headers or {})
+            resp = urllib.request.urlopen(req, timeout=timeout)
+            return resp.read()
+        except (urllib.error.URLError, OSError) as e:
+            last_error = e
+            if attempt < retries - 1:
+                time.sleep(backoff * (2**attempt))
+    raise RuntimeError(
+        f"Failed to fetch {url} after {retries} attempts: {last_error}"
+    ) from last_error
+
+
+def _github_api_get(url: str) -> bytes:
+    """Fetch data from GitHub API with proper headers."""
+    return _urlopen_with_retry(
+        url,
+        headers={
+            "Accept": "application/vnd.github.v3+json",
+            "User-Agent": "revos-catalog",
+        },
+    )
+
+
+def _list_yaml_files(repo: str, path: str) -> list[str]:
+    """List YAML files in a GitHub repo directory via API.
+
+    Returns:
+        List of file paths relative to repo root.
+    """
+    url = f"{_GITHUB_API}/{repo}/contents/{path}"
+    data = json.loads(_github_api_get(url))
+
+    files: list[str] = []
+    for entry in data:
+        if entry["type"] == "file" and entry["name"].endswith((".yaml", ".yml")):
+            files.append(entry["path"])
+        elif entry["type"] == "dir":
+            # Recurse into subdirectories (asr/, tts/)
+            files.extend(_list_yaml_files(repo, entry["path"]))
+    return files
+
+
+def _download_raw(repo: str, path: str) -> str:
+    """Download a file from GitHub as raw text.
+
+    Returns:
+        File content as string.
+    """
+    url = f"https://raw.githubusercontent.com/{repo}/HEAD/{path}"
+    data = _urlopen_with_retry(url, headers={"User-Agent": "revos-catalog"})
+    return data.decode("utf-8")
+
+
+def _load_cached_catalog(repo: str) -> list[dict] | None:
+    """Load cached catalog if it exists, is fresh, and matches the repo."""
+    if not _CACHE_FILE.exists():
+        return None
+    try:
+        data = json.loads(_CACHE_FILE.read_text())
+        if data.get("repo") != repo:
+            return None
+        cached_at = data.get("cached_at", 0)
+        if time.time() - cached_at < _CACHE_TTL:
+            return data.get("manifests")
+    except (json.JSONDecodeError, KeyError, OSError):
+        pass
+    return None
+
+
+def _save_cached_catalog(manifests: list[dict], repo: str) -> None:
+    """Save catalog to cache."""
+    _CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    data = {"cached_at": time.time(), "repo": repo, "manifests": manifests}
+    _CACHE_FILE.write_text(json.dumps(data, default=str))
+
+
+def list_catalog(task: str | None = None) -> list[ModelManifest]:
+    """Fetch available models from the remote catalog.
+
+    Args:
+        task: Optional filter by task type ("asr" or "tts").
+
+    Returns:
+        List of ModelManifest from the catalog.
+
+    Raises:
+        RuntimeError: If catalog cannot be reached.
+    """
+    # Check cache first
+    repo = get_catalog_repo()
+    cached = _load_cached_catalog(repo)
+    if cached is not None:
+        import tempfile
+
+        manifests: list[ModelManifest] = []
+        for entry in cached:
+            if task and not entry.get("path", "").startswith(f"revos/models/{task}/"):
+                continue
+            try:
+                with tempfile.NamedTemporaryFile(
+                    mode="w", suffix=".yaml", delete=False
+                ) as tmp:
+                    tmp.write(entry["content"])
+                    tmp_path = Path(tmp.name)
+
+                manifest = load_manifest(tmp_path)
+                tmp_path.unlink(missing_ok=True)
+                manifests.append(manifest)
+            except Exception as e:
+                logger.warning(
+                    "Failed to load cached entry %s: %s",
+                    entry.get("path"),
+                    e,
+                )
+        return manifests
+
+    try:
+        yaml_files = _list_yaml_files(repo, "revos/models")
+    except Exception as e:
+        raise RuntimeError(
+            f"Cannot fetch catalog from '{repo}'. "
+            f"Error: {e}\n"
+            f"Check that the repository exists and is accessible."
+        ) from e
+
+    if task:
+        yaml_files = [f for f in yaml_files if f.startswith(f"revos/models/{task}/")]
+
+    manifests = []
+    raw_entries: list[dict] = []
+    import tempfile
+
+    for yaml_path in yaml_files:
+        try:
+            content = _download_raw(repo, yaml_path)
+
+            # Write to temp file to use load_manifest
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".yaml", delete=False
+            ) as tmp:
+                tmp.write(content)
+                tmp_path = Path(tmp.name)
+
+            manifest = load_manifest(tmp_path)
+            tmp_path.unlink(missing_ok=True)
+            manifests.append(manifest)
+            raw_entries.append({"path": yaml_path, "content": content})
+        except Exception as e:
+            logger.warning("Failed to load catalog entry %s: %s", yaml_path, e)
+
+    _save_cached_catalog(raw_entries, repo)
+
+    return manifests
+
+
+def pull_model(name: str) -> Path:
+    """Pull a model manifest from the catalog and install it locally.
+
+    Downloads the YAML manifest to ~/.config/revospeech/models/{task}/
+    and registers it.
+
+    Args:
+        name: Model name to pull (e.g. "revovoice").
+
+    Returns:
+        Path to the installed manifest file.
+
+    Raises:
+        KeyError: If the model is not found in the catalog.
+        RuntimeError: If download fails.
+    """
+    repo = get_catalog_repo()
+
+    # List and search for the model
+    try:
+        yaml_files = _list_yaml_files(repo, "revos/models")
+    except Exception as e:
+        raise RuntimeError(f"Cannot fetch catalog from '{repo}'. Error: {e}") from e
+
+    target_file = None
+    target_manifest = None
+
+    for yf in yaml_files:
+        try:
+            content = _download_raw(repo, yf)
+            import tempfile
+
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".yaml", delete=False
+            ) as tmp:
+                tmp.write(content)
+                tmp_path = Path(tmp.name)
+
+            manifest = load_manifest(tmp_path)
+            tmp_path.unlink(missing_ok=True)
+            if manifest.name == name:
+                target_file = yf
+                target_manifest = manifest
+                break
+        except Exception:
+            continue
+
+    if target_file is None or target_manifest is None:
+        raise KeyError(
+            f"Model '{name}' not found in catalog "
+            f"'{repo}'. "
+            f"Run 'revos catalog list' to see available models."
+        )
+
+    # Install to user models directory
+    dest_dir = _USER_MODELS_DIR / target_manifest.task
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest_path = dest_dir / Path(target_file).name
+
+    content = _download_raw(repo, target_file)
+    dest_path.write_text(content)
+
+    # Register in the live registry
+    manifest = load_manifest(dest_path)
+    from .registry import register
+
+    register(manifest)
+
+    logger.info("Pulled model '%s' to %s", name, dest_path)
+    return dest_path
+
+
+def catalog_installed_status() -> dict[str, bool]:
+    """Return {model_name: is_installed} for all catalog models.
+
+    Uses :func:`revospeech.registry.status.check_model` to determine
+    whether each catalog model is currently installed and ready.
+    Models that raise ``KeyError`` (not registered locally) are
+    reported as ``False``.
+    """
+    installed: dict[str, bool] = {}
+    for model in list_catalog():
+        try:
+            status = check_model(model.name)
+            installed[model.name] = status.status == "ready"
+        except KeyError:
+            installed[model.name] = False
+    return installed
+
+
+def recommend_models(
+    task: str | None = None, language: str | None = None
+) -> list[ModelManifest]:
+    """Recommend top models for the given task and language.
+
+    Sorted by size (smaller = faster) and filtered by task/language.
+    Returns top 3.
+
+    Args:
+        task: Optional filter by task type ("asr" or "tts").
+        language: Optional filter by language code (e.g. "en", "fr").
+            A model matches if ``language`` is in ``model.languages`` or
+            equals ``model.language``.
+
+    Returns:
+        Up to 3 :class:`ModelManifest` instances sorted by ``size_mb``
+        ascending (smaller first), then alphabetically by name.
+    """
+    models = list_catalog(task=task)
+    if language:
+        language_lower = language.lower()
+        models = [
+            m
+            for m in models
+            if language_lower in [lang.lower() for lang in (m.languages or [])]
+            or (m.language or "").lower() == language_lower
+        ]
+    # Sort by size_mb ascending (None/0 last), then alphabetically by name.
+    models.sort(key=lambda m: (m.size_mb <= 0, m.size_mb, m.name))
+    return models[:3]

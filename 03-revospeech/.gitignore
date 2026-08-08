@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+
+# Testing
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Docs build output (mkdocs)
+site/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# RevoS
+.omc/
+tmp.py
+
+# Models (downloaded at runtime, not committed)
+# Manifests ARE committed (small YAML files)
+# Weights are cached in ~/.cache/revos/

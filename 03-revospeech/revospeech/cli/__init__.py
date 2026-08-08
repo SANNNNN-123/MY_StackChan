@@ -1,0 +1,1 @@
+"""RevoSpeech CLI package."""

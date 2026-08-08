@@ -1,0 +1,23 @@
+name: revolab-asr
+task: asr
+mode: api
+backend: revolab
+model_type: cloud
+model_url: ""
+api_endpoint: "https://api.revolab.ai/v1"
+sample_rate: 16000
+language: "ms"
+description: "Revolab cloud ASR powered by Malaysian-Qwen3-ASR-1.7B (private). 8.25% overall WER, 6.2% on telephony. Handles code-switching, accents, and noise."
+capabilities:
+  - streaming
+languages:
+  - ms
+  - en
+tags:
+  - malaysian
+  - code-switching
+  - telephony
+  - cloud
+  - api
+license: ""
+size_mb: 0

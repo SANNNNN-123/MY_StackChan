@@ -1,0 +1,1045 @@
+"""RevoSpeech CLI — Command-line interface for speech AI.
+
+Usage:
+    revos transcribe --model zipformer-v2 audio.wav
+    revos synthesize --model revovoice --text "Hello" -o output.wav
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+from pathlib import Path
+
+import click
+
+
+def _use_color() -> bool:
+    """Return True if color output should be used (TTY and NO_COLOR unset)."""
+    return sys.stdout.isatty() and not os.environ.get("NO_COLOR")
+
+
+def _format_error(prefix: str, err: Exception) -> str:
+    """Format an error message with an optional suggestion.
+
+    RevosError subclasses carry an optional ``.suggestion`` attribute that
+    provides an actionable next step. This helper appends it on its own line
+    so the user always sees what to try next.
+    """
+    suggestion = getattr(err, "suggestion", None)
+    msg = f"{prefix}: {err}"
+    if suggestion:
+        msg += f"\n\nSuggestion: {suggestion}"
+    return msg
+
+
+def _status_text(status: str) -> str:
+    """Format a status string with icon and optional color.
+
+    When color is disabled (non-TTY or NO_COLOR set), returns plain
+    ``"icon status"`` text identical to the previous non-color behavior.
+    """
+    icon = {"ready": "✓", "needs-download": "↓", "needs-api-key": "✗"}.get(status, "?")
+    if not _use_color():
+        return f"{icon} {status}"
+    color = {
+        "ready": "green",
+        "needs-download": "yellow",
+        "needs-api-key": "red",
+    }.get(status)
+    if color is None:
+        return f"{icon} {status}"
+    return click.style(f"{icon} {status}", fg=color)
+
+
+def _installed_status_text(is_installed: bool) -> str:
+    """Format an installed/not-installed indicator for catalog listing.
+
+    When color is disabled (non-TTY or NO_COLOR set), returns plain text
+    ``"installed"`` or ``"not installed"`` without icon or color.
+    """
+    if is_installed:
+        if not _use_color():
+            return "✓ installed"
+        return click.style("✓ installed", fg="green")
+    if not _use_color():
+        return "↓ not installed"
+    return click.style("↓ not installed", fg="yellow")
+
+
+def _confirm_download_size(manifest) -> bool:
+    """Prompt the user to confirm a download if its size is known.
+
+    Returns True if the download should proceed, False to abort.
+    Skips the prompt when size is unknown, input is not a TTY (piped/CI),
+    or REVOSPEECH_YES is set.
+    """
+    if os.environ.get("REVOSPEECH_YES"):
+        return True
+    if not sys.stdin.isatty():
+        return True
+    size_mb = getattr(manifest, "size_mb", None)
+    if not size_mb:
+        return True
+    return click.confirm(
+        f"About to download '{manifest.name}' ({size_mb:.0f} MB). Continue?",
+        default=True,
+    )
+
+
+@click.group(invoke_without_command=True)
+@click.version_option()
+@click.option("--verbose", "-v", is_flag=True, help="Enable debug logging.")
+@click.option(
+    "--quiet",
+    "-q",
+    is_flag=True,
+    help="Suppress info logging (warnings only).",
+)
+@click.pass_context
+def cli(ctx, verbose, quiet) -> None:
+    """RevoSpeech — A unified library for speech AI (ASR & TTS)."""
+    import logging
+
+    if verbose:
+        logging.getLogger("revospeech").setLevel(logging.DEBUG)
+    elif quiet:
+        logging.getLogger("revospeech").setLevel(logging.WARNING)
+    else:
+        logging.getLogger("revospeech").setLevel(logging.INFO)
+    ctx.ensure_object(dict)
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
+        click.echo(
+            "\nFirst time? Run `revospeech setup` for an interactive wizard, "
+            "or `revospeech info` to see current state."
+        )
+
+
+@cli.command()
+@click.option("--model", "-m", required=True, help="ASR model name (e.g. zipformer-v2)")
+@click.argument(
+    "audio_paths",
+    nargs=-1,
+    type=click.Path(exists=True),
+    required=True,
+)
+@click.option(
+    "--format",
+    "-fmt",
+    "output_format",
+    type=click.Choice(["text", "json", "srt", "vtt"]),
+    default="text",
+    help="Output format (default: text).",
+)
+@click.option(
+    "--json",
+    "json_flag",
+    is_flag=True,
+    help="Deprecated: use --format json",
+)
+@click.option(
+    "--srt",
+    "srt_flag",
+    is_flag=True,
+    help="Deprecated: use --format srt",
+)
+def transcribe(
+    model: str,
+    audio_paths: tuple[str, ...],
+    output_format: str,
+    json_flag: bool,
+    srt_flag: bool,
+) -> None:
+    """Transcribe one or more audio files to text.
+
+    Pass multiple audio paths to enable batch mode (parallel processing).
+    A single path preserves the original single-file output.
+    """
+    from revospeech.asr import ASR
+    from revospeech.exceptions import (
+        RevosAudioError,
+        RevosConfigError,
+        RevosEngineError,
+        RevosError,
+        RevosModelError,
+    )
+
+    # Resolve deprecated --json / --srt flags to --format values.
+    if json_flag:
+        output_format = "json"
+    elif srt_flag:
+        output_format = "srt"
+
+    # Single-file path: preserve backward-compatible output.
+    if len(audio_paths) == 1:
+        audio_path = audio_paths[0]
+        try:
+            asr = ASR(model)
+            result = asr.transcribe(audio_path)
+            _emit_transcript(result, output_format)
+        except RevosConfigError as e:
+            click.echo(_format_error("Configuration error", e), err=True)
+            raise SystemExit(1)
+        except RevosModelError as e:
+            click.echo(_format_error("Model error", e), err=True)
+            raise SystemExit(1)
+        except RevosEngineError as e:
+            click.echo(_format_error("Engine error", e), err=True)
+            raise SystemExit(1)
+        except RevosAudioError as e:
+            click.echo(_format_error("Audio error", e), err=True)
+            raise SystemExit(1)
+        except RevosError as e:
+            click.echo(_format_error("Error", e), err=True)
+            raise SystemExit(1)
+        except Exception as e:
+            click.echo(
+                f"Unexpected error ({type(e).__name__}): {e}\n\n"
+                f"Suggestion: re-run with 'revospeech --verbose transcribe ...' "
+                f"for a full traceback, or check 'revospeech models' to verify "
+                f"the model name.",
+                err=True,
+            )
+            raise SystemExit(1)
+        return
+
+    # Batch mode: multiple files.
+    try:
+        asr = ASR(model)
+        report = asr.transcribe_batch(list(audio_paths))
+
+        click.echo(
+            f"Transcribed {report.succeeded}/{report.total} "
+            f"in {report.total_duration:.1f}s"
+        )
+
+        for item in report.items:
+            if item.succeeded and item.result is not None:
+                if output_format == "json":
+                    data = {
+                        "file": str(item.input),
+                        "text": item.result.text,
+                        "segments": [
+                            {
+                                "start": seg.start,
+                                "end": seg.end,
+                                "text": seg.text,
+                                "confidence": seg.confidence,
+                            }
+                            for seg in item.result.segments
+                        ],
+                        "language": item.result.language,
+                    }
+                    click.echo(json.dumps(data, indent=2, ensure_ascii=False))
+                elif output_format == "srt":
+                    click.echo(f"=== {item.input} ===")
+                    for i, seg in enumerate(item.result.segments, 1):
+                        start_ts = _format_srt_time(seg.start)
+                        end_ts = _format_srt_time(seg.end)
+                        click.echo(f"{i}")
+                        click.echo(f"{start_ts} --> {end_ts}")
+                        click.echo(seg.text)
+                        click.echo()
+                elif output_format == "vtt":
+                    click.echo(f"=== {item.input} ===")
+                    click.echo("WEBVTT")
+                    click.echo()
+                    for seg in item.result.segments:
+                        start_ts = _format_vtt_time(seg.start)
+                        end_ts = _format_vtt_time(seg.end)
+                        click.echo(f"{start_ts} --> {end_ts}")
+                        click.echo(seg.text)
+                        click.echo()
+                else:  # text
+                    click.echo(f"=== {item.input} ===")
+                    click.echo(item.result.text)
+            else:
+                click.echo(f"FAILED: {item.input}: {item.error}", err=True)
+    except RevosConfigError as e:
+        click.echo(_format_error("Configuration error", e), err=True)
+        raise SystemExit(1)
+    except RevosModelError as e:
+        click.echo(_format_error("Model error", e), err=True)
+        raise SystemExit(1)
+    except RevosEngineError as e:
+        click.echo(_format_error("Engine error", e), err=True)
+        raise SystemExit(1)
+    except RevosAudioError as e:
+        click.echo(_format_error("Audio error", e), err=True)
+        raise SystemExit(1)
+    except RevosError as e:
+        click.echo(_format_error("Error", e), err=True)
+        raise SystemExit(1)
+    except Exception as e:
+        click.echo(
+            f"Unexpected error ({type(e).__name__}): {e}\n\n"
+            f"Suggestion: re-run with 'revospeech --verbose transcribe ...' "
+            f"for a full traceback, or check 'revospeech models' to verify "
+            f"the model name.",
+            err=True,
+        )
+        raise SystemExit(1)
+
+
+@cli.command()
+@click.option("--model", "-m", required=True, help="TTS model name (e.g. revovoice)")
+@click.option("--text", "-t", help="Text to synthesize")
+@click.option(
+    "--file", "-f", type=click.Path(exists=True), help="Text file to synthesize"
+)
+@click.option(
+    "--file-list",
+    "file_list",
+    type=click.Path(exists=True),
+    help="Text file with one text per line for batch synthesis",
+)
+@click.option(
+    "--output", "-o", required=True, type=click.Path(), help="Output audio path"
+)
+@click.option("--speed", default=1.0, help="Speech speed (default: 1.0)")
+@click.option(
+    "--ref-audio",
+    type=click.Path(exists=True),
+    help="Reference audio for voice cloning",
+)
+@click.option("--ref-text", help="Transcription of reference audio")
+@click.option(
+    "--restore",
+    is_flag=True,
+    default=False,
+    help="Apply speech-restoration post-processing (Sidon) to output",
+)
+def synthesize(
+    model: str,
+    text: str | None,
+    file: str | None,
+    file_list: str | None,
+    output: str,
+    speed: float,
+    ref_audio: str | None,
+    ref_text: str | None,
+    restore: bool,
+) -> None:
+    """Synthesize speech from text.
+
+    Use --text or --file for a single clip, or --file-list to synthesize
+    many texts in batch (one per line). --output in batch mode is treated
+    as the output directory (defaults to 'tts_output').
+    """
+    from revospeech.exceptions import (
+        RevosAudioError,
+        RevosConfigError,
+        RevosEngineError,
+        RevosError,
+        RevosModelError,
+    )
+    from revospeech.tts import TTS
+
+    # Batch mode via --file-list
+    if file_list is not None:
+        if text is not None or file is not None:
+            raise click.UsageError(
+                "--file-list cannot be combined with --text or --file"
+            )
+
+        with open(file_list) as f:
+            texts = [line.strip() for line in f if line.strip()]
+        if not texts:
+            raise click.UsageError("File list is empty")
+
+        output_dir = str(Path(output).parent) if output else "tts_output"
+        try:
+            tts = TTS(model, restore=restore)
+            report = tts.synthesize_batch(
+                texts,
+                output_dir=output_dir,
+                speed=speed,
+                ref_audio=ref_audio,
+                ref_text=ref_text,
+            )
+            click.echo(
+                f"Synthesized {report.succeeded}/{report.total} clips "
+                f"in {report.total_duration:.1f}s"
+            )
+            for item in report.items:
+                if item.succeeded:
+                    status = "OK"
+                else:
+                    status = f"FAIL: {item.error}"
+                preview = str(item.input)[:60]
+                click.echo(f"  [{status}] {preview}")
+        except RevosConfigError as e:
+            click.echo(_format_error("Configuration error", e), err=True)
+            raise SystemExit(1)
+        except RevosModelError as e:
+            click.echo(_format_error("Model error", e), err=True)
+            raise SystemExit(1)
+        except RevosEngineError as e:
+            click.echo(_format_error("Engine error", e), err=True)
+            raise SystemExit(1)
+        except RevosAudioError as e:
+            click.echo(_format_error("Audio error", e), err=True)
+            raise SystemExit(1)
+        except RevosError as e:
+            click.echo(_format_error("Error", e), err=True)
+            raise SystemExit(1)
+        except Exception as e:
+            click.echo(
+                f"Unexpected error ({type(e).__name__}): {e}\n\n"
+                f"Suggestion: re-run with 'revospeech --verbose synthesize ...' "
+                f"for a full traceback, or check 'revospeech models' to verify "
+                f"the model name.",
+                err=True,
+            )
+            raise SystemExit(1)
+        return
+
+    if text is None and file is None:
+        raise click.UsageError("Either --text or --file must be provided")
+
+    try:
+        if text is None and file is not None:
+            with open(file) as f:
+                text = f.read().strip()
+
+        assert text is not None
+
+        tts = TTS(model, restore=restore)
+
+        # Auto-detect long text and use synthesize_long
+        if len(text) > 500:
+            audio = tts.synthesize_long(
+                text,
+                output,
+                speed=speed,
+                ref_audio=ref_audio,
+                ref_text=ref_text,
+            )
+        else:
+            audio = tts.synthesize(
+                text,
+                output,
+                speed=speed,
+                ref_audio=ref_audio,
+                ref_text=ref_text,
+            )
+        click.echo(
+            f"Saved {len(audio.samples)} samples "
+            f"({len(audio.samples) / audio.sample_rate:.1f}s) to {output}"
+        )
+    except RevosConfigError as e:
+        click.echo(_format_error("Configuration error", e), err=True)
+        raise SystemExit(1)
+    except RevosModelError as e:
+        click.echo(_format_error("Model error", e), err=True)
+        raise SystemExit(1)
+    except RevosEngineError as e:
+        click.echo(_format_error("Engine error", e), err=True)
+        raise SystemExit(1)
+    except RevosAudioError as e:
+        click.echo(_format_error("Audio error", e), err=True)
+        raise SystemExit(1)
+    except RevosError as e:
+        click.echo(_format_error("Error", e), err=True)
+        raise SystemExit(1)
+    except Exception as e:
+        click.echo(
+            f"Unexpected error ({type(e).__name__}): {e}\n\n"
+            f"Suggestion: re-run with 'revospeech --verbose synthesize ...' "
+            f"for a full traceback, or check 'revospeech models' to verify "
+            f"the model name.",
+            err=True,
+        )
+        raise SystemExit(1)
+
+
+@cli.command()
+@click.option("--model", "-m", default="sidon", help="Util model name (default: sidon)")
+@click.option(
+    "--input",
+    "-i",
+    "input_path",
+    required=True,
+    type=click.Path(exists=True),
+    help="Input audio file",
+)
+@click.option(
+    "--output", "-o", required=True, type=click.Path(), help="Output audio path"
+)
+def restore(model: str, input_path: str, output: str) -> None:
+    """Restore / enhance speech audio using a util model.
+
+    Applies speech restoration (denoise + dereverberation + bandwidth extension)
+    to the input audio. Default model is 'sidon', which produces 48 kHz output.
+
+    Examples:
+
+        revospeech restore -i in.wav -o out.wav
+        revospeech restore -m sidon -i in.wav -o out.wav
+    """
+    from revospeech.exceptions import RevosError
+    from revospeech.util import Util
+
+    try:
+        util = Util(model)
+        audio = util.restore_file(input_path, output)
+        click.echo(
+            f"Restored '{input_path}' -> '{output}' "
+            f"({len(audio.samples)} samples @ {audio.sample_rate} Hz)"
+        )
+    except RevosError as e:
+        click.echo(_format_error("Restore error", e), err=True)
+        raise SystemExit(1)
+    except Exception as e:
+        click.echo(
+            f"Unexpected error ({type(e).__name__}): {e}\n\n"
+            f"Suggestion: run 'revospeech models' to verify '{model}' is downloaded, "
+            f"or 'revospeech --verbose restore ...' for a full traceback.",
+            err=True,
+        )
+        raise SystemExit(1)
+
+
+@cli.command()
+@click.option("--task", "-t", help="Filter by task (asr/tts)")
+@click.option("--mode", "-m", help="Filter by mode (local/api)")
+@click.option("--status", "-s", "status_filter", help="Filter by status")
+@click.option("--ready", is_flag=True, help="Show only ready models")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
+@click.option(
+    "--download",
+    "download_name",
+    default=None,
+    help="Download a model by name",
+)
+def models(
+    task: str | None,
+    mode: str | None,
+    status_filter: str | None,
+    ready: bool,
+    as_json: bool,
+    download_name: str | None,
+) -> None:
+    """List or download available models."""
+    from revospeech.registry.status import list_model_statuses
+
+    if download_name:
+        from revospeech.registry import list_models
+        from revospeech.registry.downloader import ensure_model
+
+        # Search all tasks — no task filter
+        matches = [m for m in list_models() if m.name == download_name]
+        if not matches:
+            click.echo(
+                f"Model '{download_name}' not found.\n\n"
+                f"Suggestion: run 'revospeech models' to see installed models, "
+                f"or 'revospeech catalog list' to browse remote.",
+                err=True,
+            )
+            raise SystemExit(1)
+        manifest = matches[0]
+
+        if not _confirm_download_size(manifest):
+            click.echo("Aborted.")
+            return
+
+        click.echo(f"Downloading {download_name}...")
+        ensure_model(manifest)
+        click.echo(f"Done. {download_name} is ready.")
+        return
+
+    kwargs: dict = {}
+    if task:
+        kwargs["task"] = task
+    if mode:
+        kwargs["mode"] = mode
+    if status_filter:
+        kwargs["status"] = status_filter
+    if ready:
+        kwargs["status"] = "ready"
+
+    model_list = list_model_statuses(**kwargs)
+
+    if not model_list:
+        click.echo(
+            "No models found.\n\n"
+            "Suggestion: run 'revospeech catalog list' to browse remote models "
+            "or 'revospeech catalog pull <name>' to install one."
+        )
+        return
+
+    if as_json:
+        click.echo(
+            json.dumps(
+                [
+                    {
+                        "name": m.name,
+                        "task": m.task,
+                        "mode": m.mode,
+                        "status": m.status,
+                        "size_mb": m.size_mb,
+                        "capabilities": m.capabilities,
+                        "languages": m.languages,
+                    }
+                    for m in model_list
+                ],
+                indent=2,
+            )
+        )
+        return
+
+    # Table header
+    click.echo(
+        f"{'NAME':<20} {'TASK':<6} {'MODE':<7} {'STATUS':<16} {'SIZE':>8}  "
+        f"{'LANG':<15} {'CAPABILITIES'}"
+    )
+    click.echo("-" * 90)
+
+    for m in model_list:
+        size = f"{m.size_mb:.0f} MB" if m.size_mb else "—"
+        langs = ",".join(m.languages[:3]) if m.languages else "—"
+        caps = ",".join(m.capabilities[:3]) if m.capabilities else "—"
+        status_text = _status_text(m.status)
+        click.echo(
+            f"{m.name:<20} {m.task:<6} {m.mode:<7} {status_text:<16} "
+            f"{size:>8}  {langs:<15} {caps}"
+        )
+
+
+@cli.command("models-info")
+@click.argument("name")
+def models_info(name: str) -> None:
+    """Show detailed info for a model."""
+    from revospeech.registry.status import check_model
+
+    try:
+        m = check_model(name)
+    except KeyError as e:
+        click.echo(
+            f"Error: {e}\n\n"
+            f"Suggestion: run 'revospeech models' to list available models.",
+            err=True,
+        )
+        raise SystemExit(1)
+
+    size = f"{m.size_mb:.0f} MB" if m.size_mb else "—"
+    langs = ", ".join(m.languages) if m.languages else "—"
+    caps = ", ".join(m.capabilities) if m.capabilities else "—"
+
+    click.echo(f"  Model:        {m.name}")
+    click.echo(f"  Task:         {m.task}")
+    click.echo(f"  Mode:         {m.mode}")
+    click.echo(f"  Status:       {_status_text(m.status)}")
+    click.echo(f"  Size:         {size}")
+    click.echo(f"  Languages:    {langs}")
+    click.echo(f"  Capabilities: {caps}")
+
+
+@cli.command()
+@click.argument("query")
+def search(query: str) -> None:
+    """Search models by name, tag, or language."""
+    import revospeech
+
+    results = revospeech.search_models(query)
+    if not results:
+        click.echo(
+            f"No models matching '{query}'.\n\n"
+            f"Suggestion: try 'revospeech search <different-query>' "
+            f"or 'revospeech catalog list' to see all available models."
+        )
+        return
+
+    # Status icon lookup shared with _status_text so coloring stays consistent.
+    status_icon_map = {"ready": "✓", "needs-download": "↓", "needs-api-key": "✗"}
+    for m in results:
+        size = f"{m.size_mb:.0f} MB" if m.size_mb else "—"
+        icon = status_icon_map.get(m.status, "?")
+        click.echo(
+            f"  {icon} {m.name:<20} {m.task:<6} {m.mode:<7} {m.status:<16} {size}"
+        )
+
+
+@cli.command()
+def info() -> None:
+    """Show version, device, cache size, and API key status."""
+    import sys
+
+    from revospeech import __version__
+    from revospeech.config import get_api_key
+    from revospeech.device import auto_detect_device
+    from revospeech.registry.downloader import CACHE_DIR
+
+    click.echo(f"revospeech {__version__}")
+    click.echo(f"Python:          {sys.version.split()[0]}")
+    click.echo(f"Device: {auto_detect_device()}")
+
+    # Cache size
+    cache = Path(CACHE_DIR)
+    click.echo(f"Cache dir:       {cache}")
+    if cache.exists():
+        total = sum(f.stat().st_size for f in cache.rglob("*") if f.is_file())
+        click.echo(f"Cache: {cache} ({total / 1e6:.1f} MB)")
+    else:
+        click.echo(f"Cache: {cache} (empty)")
+
+    # API key status
+    key = get_api_key()
+    if key:
+        click.echo(f"API key: {key[:4]}...{key[-4:]} (set)")
+    else:
+        click.echo("API key: not set")
+
+    from revospeech.catalog import get_catalog_repo
+
+    click.echo(f"Catalog repo: {get_catalog_repo()}")
+
+    # Actionable hint for fresh installs: no ready models → suggest setup.
+    from revospeech.registry.status import list_model_statuses
+
+    ready = list_model_statuses(status="ready")
+    if not ready:
+        click.echo(
+            "\nNo models installed yet. Run `revospeech setup` to pick and "
+            "download your first model, or `revospeech catalog list` to browse."
+        )
+
+
+@cli.command()
+def setup() -> None:
+    """Interactive setup wizard for first-time users."""
+    from revospeech.registry.status import list_model_statuses
+
+    click.echo("Welcome to RevoSpeech! Let's get you set up.\n")
+
+    # Step 1: Pick task
+    task = click.prompt(
+        "What do you want to do?",
+        type=click.Choice(["asr", "tts", "both"]),
+        default="both",
+    )
+
+    tasks = ["asr", "tts"] if task == "both" else [task]
+
+    # Step 2: Show available models for each task
+    for t in tasks:
+        click.echo(f"\n--- {t.upper()} models ---")
+        models = list_model_statuses(task=t)
+        if not models:
+            click.echo(f"No {t} models registered. Try: revospeech catalog list")
+            continue
+        for m in models:
+            icon = {"ready": "✓", "needs-download": "↓", "needs-api-key": "✗"}.get(
+                m.status, "?"
+            )
+            click.echo(f"  {icon} {m.name:<20} {m.status}")
+
+    # Step 3: Offer to install a model
+    if click.confirm("\nInstall a model now?", default=True):
+        name = click.prompt("Model name", type=str)
+        try:
+            from revospeech.registry import list_models
+            from revospeech.registry.downloader import ensure_model
+
+            matches = [m for m in list_models() if m.name == name]
+            if not matches:
+                click.echo(
+                    f"Model '{name}' not found.\n\n"
+                    f"Suggestion: run 'revospeech models' to see installed models, "
+                    f"or 'revospeech catalog list' to browse remote.",
+                    err=True,
+                )
+            else:
+                if not _confirm_download_size(matches[0]):
+                    click.echo("Skipped.")
+                else:
+                    click.echo(f"Downloading {name}...")
+                    ensure_model(matches[0])
+                    click.echo(f"Done. {name} is ready.")
+        except Exception as e:
+            click.echo(f"Error ({type(e).__name__}): {e}", err=True)
+
+    # Step 4: API key (optional)
+    if click.confirm("\nSet up API key for cloud models? (optional)", default=False):
+        key = click.prompt("Enter API key", hide_input=True)
+        from revospeech.config import set_api_key
+
+        set_api_key(key)
+        click.echo("API key saved.")
+
+    click.echo("\nSetup complete! Try: revospeech info")
+
+
+@cli.group()
+def catalog() -> None:
+    """Browse and pull models from the remote catalog."""
+
+
+@cli.group()
+def config() -> None:
+    """Manage API key and configuration."""
+
+
+@config.command("set-api-key")
+def config_set_api_key() -> None:
+    """Prompt for an API key and save it to the config file."""
+    from revospeech.config import get_api_key, set_api_key
+
+    if get_api_key():
+        click.echo("API key already set. Overwrite? [y/N] ", nl=False)
+        confirmation = click.get_text_stream("stdin").readline().strip().lower()
+        if confirmation not in ("y", "yes"):
+            click.echo("Aborted.")
+            return
+    key = click.prompt("Enter API key", hide_input=True, confirmation_prompt=True)
+    try:
+        set_api_key(key)
+    except Exception as e:
+        click.echo(
+            f"Error ({type(e).__name__}): {e}\n\n"
+            f"Suggestion: check that ~/.config/revospeech/ exists and is writable, "
+            f"or set REVOS_API_KEY in your environment.",
+            err=True,
+        )
+        raise SystemExit(1)
+    click.echo("API key saved to ~/.config/revospeech/config.yaml")
+
+
+@config.command("show-api-key")
+def config_show_api_key() -> None:
+    """Show the currently configured API key (masked)."""
+    from revospeech.config import get_api_key
+
+    key = get_api_key()
+    if key:
+        masked = f"{key[:4]}...{key[-4:]}"
+        click.echo(f"API key: {masked} (set)")
+    else:
+        click.echo("API key: not set")
+
+
+@catalog.command("list")
+@click.option("--task", "-t", help="Filter by task type (asr or tts)")
+def catalog_list(task: str | None) -> None:
+    """List models available in the remote catalog."""
+    from revospeech.catalog import (
+        catalog_installed_status,
+        get_catalog_repo,
+        list_catalog,
+    )
+
+    click.echo(f"Fetching catalog from {get_catalog_repo()}...")
+    try:
+        results = list_catalog(task)
+    except RuntimeError as e:
+        click.echo(
+            f"Error: {e}\n\n"
+            f"Suggestion: check your network connection, or set the "
+            f"REVOS_CATALOG_REPO environment variable to use a different catalog.",
+            err=True,
+        )
+        raise SystemExit(1)
+
+    if not results:
+        click.echo(
+            "No models found in catalog.\n\n"
+            "Suggestion: verify REVOS_CATALOG_REPO points to a valid repo, "
+            "or try 'revospeech catalog pull <name>' with a known model name."
+        )
+        return
+
+    try:
+        installed_map = catalog_installed_status()
+    except Exception:
+        # Network/catalog failures should not break listing.
+        installed_map = {}
+
+    click.echo(
+        f"{'Name':<20} {'Task':<6} {'Backend':<15} {'Language':<12} "
+        f"{'Version':<12} {'Status'}"
+    )
+    click.echo("-" * 80)
+    for m in results:
+        rev = m.revision or "latest"
+        is_installed = installed_map.get(m.name, False)
+        status_text = _installed_status_text(is_installed)
+        click.echo(
+            f"{m.name:<20} {m.task:<6} {m.backend:<15} {m.language:<12} "
+            f"{rev:<12} {status_text}"
+        )
+    click.echo("\nUse 'revos catalog pull <name>' to install.")
+
+
+@catalog.command("pull")
+@click.argument("model_name")
+def catalog_pull(model_name: str) -> None:
+    """Pull a model from the catalog and install it locally."""
+    from revospeech.catalog import get_catalog_repo, pull_model
+
+    click.echo(f"Pulling '{model_name}' from {get_catalog_repo()}...")
+    try:
+        dest = pull_model(model_name)
+    except (KeyError, RuntimeError) as e:
+        click.echo(
+            f"Error: {e}\n\n"
+            f"Suggestion: run 'revospeech catalog list' to see what's available, "
+            f"or verify REVOS_CATALOG_REPO and your network connection.",
+            err=True,
+        )
+        raise SystemExit(1)
+
+    click.echo(f"Installed to {dest}")
+    click.echo(f"Use: from revospeech.tts import TTS; TTS('{model_name}')")
+
+
+@catalog.command("search")
+@click.argument("query")
+@click.option("--task", "-t", help="Filter by task (asr/tts)")
+@click.option("--language", "-l", help="Filter by language code")
+def catalog_search(query, task, language) -> None:
+    """Search the remote catalog by name, language, or task."""
+    from revospeech.catalog import list_catalog
+
+    models = list_catalog()
+    query_lower = query.lower()
+    matches = []
+    for m in models:
+        name = m.name.lower()
+        desc = (m.description or "").lower()
+        langs = [lang.lower() for lang in (m.languages or [])]
+        tags = [tag.lower() for tag in (m.tags or [])]
+        m_task = (m.task or "").lower()
+
+        if task and m.task != task:
+            continue
+        if language and language.lower() not in langs:
+            continue
+
+        if (
+            query_lower in name
+            or query_lower in desc
+            or query_lower in " ".join(langs)
+            or query_lower in " ".join(tags)
+            or query_lower in m_task
+        ):
+            matches.append(m)
+
+    if not matches:
+        click.echo(
+            f"No models found for '{query}'.\n\n"
+            f"Suggestion: try 'revospeech catalog list' to see all available models, "
+            f"or broaden your query."
+        )
+        return
+
+    for m in matches:
+        click.echo(f"  {m.name:<25} {m.task:<6} {m.description or ''}")
+
+
+@catalog.command("recommend")
+@click.option("--task", "-t", help="Filter by task (asr/tts)")
+@click.option("--language", "-l", help="Filter by language code (e.g. en, fr)")
+def catalog_recommend(task: str | None, language: str | None) -> None:
+    """Show recommended models (top 3 by size)."""
+    from revospeech.catalog import recommend_models
+
+    try:
+        results = recommend_models(task=task, language=language)
+    except RuntimeError as e:
+        click.echo(
+            f"Error: {e}\n\n"
+            f"Suggestion: check your network connection or REVOS_CATALOG_REPO; "
+            f"run 'revospeech catalog list' to browse manually.",
+            err=True,
+        )
+        raise SystemExit(1)
+
+    if not results:
+        click.echo(
+            "No matching models found.\n\n"
+            "Suggestion: relax your filters, or run 'revospeech catalog list' "
+            "to see all available models."
+        )
+        return
+
+    click.echo(f"Top {len(results)} recommended models:")
+    click.echo()
+    for i, m in enumerate(results, 1):
+        size = f"{m.size_mb:.0f} MB" if m.size_mb else "—"
+        click.echo(
+            f"  {i}. {m.name:<20} {m.task:<6} {size:>10}  {m.language or '—':<12}"
+        )
+    click.echo()
+    click.echo("Install with: revospeech catalog pull <name>")
+
+
+def _get_version() -> str:
+    """Get revos version without triggering heavy imports."""
+    from importlib.metadata import version
+
+    try:
+        return version("revospeech")
+    except Exception:
+        return "unknown"
+
+
+def _format_srt_time(seconds: float) -> str:
+    """Format seconds as SRT timestamp (HH:MM:SS,mmm)."""
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    millis = int((seconds % 1) * 1000)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
+
+
+def _format_vtt_time(seconds: float) -> str:
+    """Format seconds as WebVTT timestamp (HH:MM:SS.mmm)."""
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    millis = int((seconds % 1) * 1000)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}.{millis:03d}"
+
+
+def _emit_transcript(result, output_format: str) -> None:
+    """Print a single Transcript in the requested output format."""
+    if output_format == "json":
+        data = {
+            "text": result.text,
+            "segments": [
+                {
+                    "start": seg.start,
+                    "end": seg.end,
+                    "text": seg.text,
+                    "confidence": seg.confidence,
+                }
+                for seg in result.segments
+            ],
+            "language": result.language,
+        }
+        click.echo(json.dumps(data, indent=2, ensure_ascii=False))
+    elif output_format == "srt":
+        for i, seg in enumerate(result.segments, 1):
+            start_ts = _format_srt_time(seg.start)
+            end_ts = _format_srt_time(seg.end)
+            click.echo(f"{i}")
+            click.echo(f"{start_ts} --> {end_ts}")
+            click.echo(seg.text)
+            click.echo()
+    elif output_format == "vtt":
+        click.echo("WEBVTT")
+        click.echo()
+        for seg in result.segments:
+            start_ts = _format_vtt_time(seg.start)
+            end_ts = _format_vtt_time(seg.end)
+            click.echo(f"{start_ts} --> {end_ts}")
+            click.echo(seg.text)
+            click.echo()
+    else:  # text
+        click.echo(result.text)
+
+
+if __name__ == "__main__":
+    cli()

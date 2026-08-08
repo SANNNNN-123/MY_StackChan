@@ -1,0 +1,166 @@
+"""RevoVoice backend for TTS (diffusion-based zero-shot TTS)."""
+
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+
+import numpy as np
+
+from revospeech.hf_utils import get_hf_user, wrap_hf_error
+from revospeech.registry import get
+
+from .base import BaseTTS
+from .result import Audio
+
+logger = logging.getLogger(__name__)
+
+
+class RevoVoiceTTS(BaseTTS):
+    """TTS engine using RevoVoice diffusion model.
+
+    Supports voice cloning, voice design, and auto voice generation
+    across 600+ languages.
+    """
+
+    def __init__(self, model_name: str, device: str = "auto") -> None:
+        super().__init__(model_name, device)
+
+        try:
+            from omnivoice import OmniVoice  # type: ignore[import-untyped]
+        except ImportError as e:
+            raise ImportError(
+                "RevoVoice is required for TTS. Install it with: pip install revos[tts]"
+            ) from e
+
+        manifest = get(model_name, "tts")
+        model_id = manifest.model_url
+        revision = manifest.revision or None
+
+        # Resolve device map for RevoVoice
+        if self.device == "auto":
+            try:
+                import torch
+
+                if torch.cuda.is_available():
+                    self.device = "cuda"
+                else:
+                    self.device = "cpu"
+            except ImportError:
+                self.device = "cpu"
+
+        device_map = f"{self.device}:0" if self.device == "cuda" else self.device
+
+        logger.info(
+            "Loading RevoVoice TTS model %s (device=%s%s)",
+            model_name,
+            device_map,
+            f", revision={revision}" if revision else "",
+        )
+
+        # Identify the HF user for gated model tracking
+        self.hf_user = get_hf_user()
+        if self.hf_user:
+            logger.info("Authenticated as HuggingFace user: %s", self.hf_user)
+        else:
+            logger.warning(
+                "HuggingFace user not identified. "
+                "Run 'huggingface-cli login' for access to gated models."
+            )
+
+        try:
+            self._model = OmniVoice.from_pretrained(
+                model_id,
+                device_map=device_map,
+                **({"revision": revision} if revision else {}),
+            )
+        except OSError as e:
+            raise wrap_hf_error(e, model_id) from e
+
+        self._sample_rate = manifest.sample_rate
+        self._model_id = model_id
+        logger.info("RevoVoice TTS model %s loaded", model_name)
+
+        # Track gated model usage
+        from revospeech.usage import track_usage
+
+        track_usage(
+            event="model_loaded",
+            model_id=model_id,
+            model_name=model_name,
+            task="tts",
+            hf_user=self.hf_user,
+            device=self.device,
+        )
+
+    def synthesize(
+        self,
+        text: str,
+        output_path: str | Path | None = None,
+        *,
+        speed: float = 1.0,
+        ref_audio: str | None = None,
+        ref_text: str | None = None,
+    ) -> Audio:
+        """Synthesize speech using RevoVoice.
+
+        Args:
+            text: Text to synthesize.
+            output_path: Optional path to save the audio file.
+            speed: Speech speed multiplier.
+            ref_audio: Optional reference audio for voice cloning.
+            ref_text: Optional transcription of reference audio.
+
+        Returns:
+            Audio object with synthesized samples.
+        """
+        kwargs: dict = {"text": text, "speed": speed}
+
+        if ref_audio:
+            kwargs["ref_audio"] = ref_audio
+            if ref_text:
+                kwargs["ref_text"] = ref_text
+
+        result = self._model.generate(**kwargs)
+
+        # RevoVoice returns a list of np.ndarray
+        if isinstance(result, list) and len(result) > 0:
+            samples = np.array(result[0], dtype=np.float32)
+        else:
+            samples = np.array(result, dtype=np.float32)
+
+        audio = Audio(samples=samples, sample_rate=self._sample_rate)
+
+        if output_path:
+            audio.save(output_path)
+            logger.info("Saved synthesized audio to %s", output_path)
+
+        return audio
+
+    def list_voices(self) -> list[str]:
+        """RevoVoice uses zero-shot voice cloning, so no fixed voice list.
+
+        Use ref_audio= parameter to clone any voice.
+        """
+        return []
+
+    def synthesize_streaming(self, text: str, **kwargs):
+        """Stream synthesis: split text into sentences and yield one Audio per chunk.
+
+        This is chunk-based streaming (not token-level). Useful for:
+        - Starting playback before full synthesis completes
+        - Pipelines that consume audio incrementally
+
+        Args:
+            text: Text to synthesize.
+            **kwargs: Passed to synthesize() (speed, ref_audio, etc.)
+
+        Yields:
+            Audio: One Audio object per sentence chunk.
+        """
+        from revospeech.tts.base import DEFAULT_MAX_CHARS, _split_text
+
+        chunks = _split_text(text, max_chars=DEFAULT_MAX_CHARS)
+        for chunk in chunks:
+            audio = self.synthesize(chunk, **kwargs)
+            yield audio
