@@ -1,0 +1,6 @@
+/MY_StackChan/03-revospeech$ python bridge/server.py
+
+
+
+
+MY_StackChan/01-ai-stackchan-ex-realtime$ ./scripts/flash.sh
