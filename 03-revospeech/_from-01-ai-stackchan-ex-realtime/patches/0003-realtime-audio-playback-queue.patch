@@ -1,0 +1,241 @@
+diff --git a/firmware/src/llm/RealtimeLLMBase.cpp b/firmware/src/llm/RealtimeLLMBase.cpp
+index 278ac85..3711a8c 100644
+--- a/firmware/src/llm/RealtimeLLMBase.cpp
++++ b/firmware/src/llm/RealtimeLLMBase.cpp
+@@ -17,12 +17,14 @@
+ #include <base64.h>
+ #include "libb64/cdecode.h"
+ #include <WebSocketsClient.h>
++#include "esp_heap_caps.h"
+ 
+ using namespace m5avatar;
+ extern Avatar avatar;
+ 
+ int16_t rtRecBuf[RT_REC_LENGTH];    // リアルタイム録音用メモリ
+                                     // Core2だとヒープが不足するので静的な配列とした
++int16_t rtResampledBuf[RT_REC_LENGTH * RT_AUDIO_SAMPLE_RATE / RT_REC_SAMPLE_RATE];
+ 
+ TaskHandle_t webSocketLoopTask_h = NULL;
+ 
+@@ -47,7 +49,11 @@ RealtimeLLMBase::RealtimeLLMBase(llm_param_t param) :
+     realtime_recording(false),
+     response_done(false),
+     startTime(0),
+-    nextBufIdx(0),
++    audioLevel(0),
++    audioQueuedBytes(0),
++    audioChunksReceived(0),
++    audioChunksDropped(0),
++    audioQueuePeak(0),
+     outputText(String(""))
+ {
+ #ifdef REALTIME_API_RECORD_TEST
+@@ -58,11 +64,18 @@ RealtimeLLMBase::RealtimeLLMBase(llm_param_t param) :
+ #endif
+ 
+ #ifndef REALTIME_API_WITH_TTS
+-  // ストリーミング音声再生用のダブルバッファを初期化
+-  for(int i=0; i<2; i++){
+-    audioBuf[i] = (uint8_t*)malloc(100 * 1024);
+-    memset(audioBuf[i], 0, 100 * 1024);
++  audioFreeQueue = xQueueCreate(RT_AUDIO_QUEUE_LENGTH, sizeof(uint8_t*));
++  audioReadyQueue = xQueueCreate(RT_AUDIO_QUEUE_LENGTH, sizeof(AudioChunk));
++  for(int i = 0; i < RT_AUDIO_QUEUE_LENGTH; i++){
++    audioBuf[i] = (uint8_t*)heap_caps_malloc(RT_AUDIO_CHUNK_SIZE + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
++    if(audioBuf[i] == nullptr){
++      Serial.printf("Audio buffer allocation failed: %d\n", i);
++      continue;
++    }
++    memset(audioBuf[i], 0, RT_AUDIO_CHUNK_SIZE + 1);
++    xQueueSend(audioFreeQueue, &audioBuf[i], 0);
+   }
++  xTaskCreate(audioPlaybackTask, "audioPlaybackTask", 4096, this, 3, nullptr);
+ #endif
+ 
+ }
+@@ -88,7 +101,16 @@ void RealtimeLLMBase::webSocketProcess()
+         //M5.Mic.end();
+         exitMutexAudio();
+         String audio_base64;
+-        audio_base64 = base64::encode((u8*)rtRecBuf, rtRecLength * sizeof(int16_t));
++        const int resampledLength = rtRecLength * RT_AUDIO_SAMPLE_RATE / RT_REC_SAMPLE_RATE;
++        for(int i = 0; i < resampledLength; i++){
++            const float sourcePosition = (float)i * RT_REC_SAMPLE_RATE / RT_AUDIO_SAMPLE_RATE;
++            const int sourceIndex = (int)sourcePosition;
++            const float fraction = sourcePosition - sourceIndex;
++            const int16_t first = rtRecBuf[sourceIndex];
++            const int16_t second = rtRecBuf[(sourceIndex + 1 < rtRecLength) ? sourceIndex + 1 : sourceIndex];
++            rtResampledBuf[i] = (int16_t)(first + (second - first) * fraction);
++        }
++        audio_base64 = base64::encode((u8*)rtResampledBuf, resampledLength * sizeof(int16_t));
+ 
+ #ifdef REALTIME_API_RECORD_TEST
+         if((recTestLenCnt + rtRecLength) < recTestLenMax){
+@@ -127,7 +149,7 @@ void RealtimeLLMBase::webSocketProcess()
+ 
+ int RealtimeLLMBase::getAudioLevel()
+ {
+-    return abs(*audioBuf[nextBufIdx ^ 1]) * 50;
++    return audioLevel;
+ }
+ 
+ void RealtimeLLMBase::startRealtimeRecord()
+@@ -217,15 +239,84 @@ void RealtimeLLMBase::hexdump(const void *mem, uint32_t len, uint8_t cols) {
+ 
+ void RealtimeLLMBase::streamAudioDelta(String& delta)
+ {
+-    int base64Size = delta.length();
+-    Serial.printf("audio base64 size: %d byte\n", base64Size);
+-    uint8_t* buf = audioBuf[nextBufIdx];
+-    int len = base64_decode(delta.c_str(), base64Size, (char*)buf);
+-    Serial.printf("audio pcm16 size: %d byte\n", len);
+-
+-    while (M5.Speaker.isPlaying()) { vTaskDelay(1); }
+-    M5.Speaker.playRaw((int16_t*)buf, len/2, 24000, false);
+-    nextBufIdx ^= 1;  //ダブルバッファを切り替え
++    uint8_t* buf = nullptr;
++    // Apply backpressure instead of dropping audio when playback is temporarily behind.
++    if(xQueueReceive(audioFreeQueue, &buf, portMAX_DELAY) != pdTRUE || buf == nullptr){
++        audioChunksDropped++;
++        return;
++    }
++
++    int len = base64_decode(delta.c_str(), delta.length(), (char*)buf);
++    if(len <= 0 || len > RT_AUDIO_CHUNK_SIZE){
++        xQueueSend(audioFreeQueue, &buf, 0);
++        audioChunksDropped++;
++        return;
++    }
++
++    AudioChunk chunk = {buf, (size_t)len};
++    if(xQueueSend(audioReadyQueue, &chunk, 0) != pdTRUE){
++        xQueueSend(audioFreeQueue, &buf, 0);
++        audioChunksDropped++;
++        return;
++    }
++    audioChunksReceived++;
++    audioQueuedBytes += len;
++    const uint32_t queueDepth = uxQueueMessagesWaiting(audioReadyQueue);
++    if(queueDepth > audioQueuePeak){
++        audioQueuePeak = queueDepth;
++    }
++}
++
++void RealtimeLLMBase::audioPlaybackTask(void *arg)
++{
++    RealtimeLLMBase* self = (RealtimeLLMBase*)arg;
++    AudioChunk chunk;
++    bool prebuffering = true;
++    TickType_t prebufferStart = xTaskGetTickCount();
++    TickType_t reportTime = prebufferStart;
++    const size_t prebufferBytes = RT_AUDIO_SAMPLE_RATE * 2 * RT_AUDIO_PREBUFFER_MS / 1000;
++
++    while(true){
++        if(prebuffering){
++            const TickType_t now = xTaskGetTickCount();
++            if(self->audioQueuedBytes == 0){
++                prebufferStart = now;
++                vTaskDelay(1);
++                continue;
++            }
++            const bool bufferReady = self->audioQueuedBytes >= prebufferBytes;
++            const bool bufferTimedOut = (now - prebufferStart) >= pdMS_TO_TICKS(300);
++            if(!bufferReady && !bufferTimedOut){
++                vTaskDelay(1);
++                continue;
++            }
++            prebuffering = false;
++        }
++
++        if(xQueueReceive(self->audioReadyQueue, &chunk, portMAX_DELAY) == pdTRUE){
++            self->audioQueuedBytes -= chunk.length;
++            self->audioLevel = abs(((int16_t*)chunk.buffer)[0]) * 50;
++            M5.Speaker.playRaw((int16_t*)chunk.buffer, chunk.length / 2, RT_AUDIO_SAMPLE_RATE, false);
++            while(M5.Speaker.isPlaying()){
++                vTaskDelay(1);
++            }
++            self->audioLevel = 0;
++            xQueueSend(self->audioFreeQueue, &chunk.buffer, portMAX_DELAY);
++            if(uxQueueMessagesWaiting(self->audioReadyQueue) == 0){
++                prebuffering = true;
++                prebufferStart = xTaskGetTickCount();
++            }
++        }
++
++        const TickType_t now = xTaskGetTickCount();
++        if(now - reportTime >= pdMS_TO_TICKS(5000)){
++            Serial.printf("[Audio] received=%lu dropped=%lu queue_peak=%lu\n",
++                          self->audioChunksReceived,
++                          self->audioChunksDropped,
++                          self->audioQueuePeak);
++            reportTime = now;
++        }
++    }
+ }
+ 
+ void RealtimeLLMBase::invokeWebSocketLoopTask(void)
+@@ -254,4 +344,4 @@ void RealtimeLLMBase::resumeWebSocketLoopTask(void)
+     }
+ }
+ 
+-#endif  //REALTIME_API
+\ No newline at end of file
++#endif  //REALTIME_API
+diff --git a/firmware/src/llm/RealtimeLLMBase.h b/firmware/src/llm/RealtimeLLMBase.h
+index b12dcbe..2b00b3a 100644
+--- a/firmware/src/llm/RealtimeLLMBase.h
++++ b/firmware/src/llm/RealtimeLLMBase.h
+@@ -17,6 +17,10 @@
+ 
+ #define RT_REC_LENGTH       (2000)      //0.125s 
+ #define RT_REC_SAMPLE_RATE  (16000)
++#define RT_AUDIO_SAMPLE_RATE (24000)
++#define RT_AUDIO_PREBUFFER_MS (200)
++#define RT_AUDIO_CHUNK_SIZE (64 * 1024)
++#define RT_AUDIO_QUEUE_LENGTH (32)
+ 
+ #ifdef REALTIME_API_RECORD_TEST
+ #define REALTIME_RECORD_TIMEOUT     (4 * 1000)      //ms  ※録音テスト再生用バッファのサイズに合わせる
+@@ -30,6 +34,10 @@ extern const String json_ChatString;
+ class RealtimeLLMBase: public LLMBase{
+ //private:
+ public:   //本当はprivateにしたいところだがコールバック関数にthisポインタを渡して使うためにpublicとした
++    struct AudioChunk {
++        uint8_t* buffer;
++        size_t length;
++    };
+     WebSocketsClient webSocket;
+     SpiRamJsonDocument msgDoc;
+ 
+@@ -50,8 +58,14 @@ public:   //本当はprivateにしたいところだがコールバック関数
+ 
+     // for play
+     //
+-    uint8_t* audioBuf[2];    // Base64をデコードして得た音声データを格納するバッファ。再生直後に更新すると音が切れたのでダブルバッファとした
+-    int nextBufIdx;          // 次回データを格納するダブルバッファの面（0 or 1）
++    uint8_t* audioBuf[RT_AUDIO_QUEUE_LENGTH];
++    QueueHandle_t audioFreeQueue;
++    QueueHandle_t audioReadyQueue;
++    volatile int audioLevel;
++    volatile size_t audioQueuedBytes;
++    volatile uint32_t audioChunksReceived;
++    volatile uint32_t audioChunksDropped;
++    volatile uint32_t audioQueuePeak;
+ 
+ public:
+     RealtimeLLMBase(llm_param_t param);
+@@ -73,6 +87,7 @@ public:
+     int base64_decode(const char* input, int size, char* output);
+     void hexdump(const void *mem, uint32_t len, uint8_t cols = 16);
+     void streamAudioDelta(String& delta);
++    static void audioPlaybackTask(void *arg);
+ 
+     // for TTS
+     //
+@@ -83,4 +98,4 @@ public:
+ 
+ #endif  //_REALTIME_LLM_BASE_H
+ 
+-#endif  //REALTIME_API
+\ No newline at end of file
++#endif  //REALTIME_API
