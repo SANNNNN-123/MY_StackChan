@@ -52,6 +52,7 @@ fi
 apply_patch "$ROOT/patches/0003-realtime-audio-playback-queue.patch"
 apply_patch "$ROOT/patches/0004-malay-default-role.patch"
 apply_patch "$ROOT/patches/0005-reduce-realtime-serial-logging.patch"
+apply_patch "$ROOT/patches/0006-revospeech-local-bridge.patch"
 
 # Select the original OpenAI Realtime audio model. Keep this idempotent so a
 # rerun after a partial bootstrap restores the original model if necessary.
