@@ -11,8 +11,11 @@ import json
 import io
 import logging
 import os
+import time
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+import numpy as np
 
 
 def load_dotenv() -> None:
@@ -48,6 +51,14 @@ SYSTEM_PROMPT = os.getenv(
 
 OPENAI = OpenAI()
 TTS_ENGINE = TTS("vits-ms")
+BRIDGE_SAMPLE_RATE = 16000
+
+
+def warm_up_tts() -> None:
+    """Load the VITS speaker before accepting the first robot request."""
+    LOG.info("warming local Malay TTS model")
+    TTS_ENGINE.synthesize("Hai.", speaker="sarah")
+    LOG.info("local Malay TTS model ready")
 
 
 def transcribe_audio(wav_bytes: bytes) -> str:
@@ -89,8 +100,24 @@ def synthesize_text(text: str) -> bytes:
 def audio_to_wav(audio) -> bytes:
     import soundfile as sf
 
+    samples = audio.samples
+    if audio.sample_rate != BRIDGE_SAMPLE_RATE and len(samples) > 0:
+        target_length = round(len(samples) * BRIDGE_SAMPLE_RATE / audio.sample_rate)
+        source_positions = np.linspace(0, len(samples) - 1, target_length)
+        samples = np.interp(
+            source_positions,
+            np.arange(len(samples)),
+            samples,
+        ).astype(np.float32)
+
     output = io.BytesIO()
-    sf.write(output, audio.samples, audio.sample_rate, format="WAV", subtype="PCM_16")
+    sf.write(
+        output,
+        samples,
+        BRIDGE_SAMPLE_RATE,
+        format="WAV",
+        subtype="PCM_16",
+    )
     return output.getvalue()
 
 
@@ -122,18 +149,34 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         try:
+            request_started = time.perf_counter()
             wav_bytes = self.rfile.read(length)
             if self.path == "/v1/transcribe":
+                started = time.perf_counter()
                 transcript = transcribe_audio(wav_bytes)
                 self._send_json(200, {"text": transcript, "model": ASR_MODEL})
-                LOG.info("transcription completed: input=%d text=%r", length, transcript)
+                LOG.info(
+                    "transcription completed: input=%d elapsed=%.3fs text=%r",
+                    length,
+                    time.perf_counter() - started,
+                    transcript,
+                )
                 return
 
             if self.headers.get("Content-Type", "").startswith("text/plain"):
+                started = time.perf_counter()
                 output = synthesize_text(wav_bytes.decode("utf-8"))
+                LOG.info("TTS synthesis completed: elapsed=%.3fs", time.perf_counter() - started)
             else:
+                started = time.perf_counter()
                 output = process_audio(wav_bytes)
-            LOG.info("sending voice response: input=%d output=%d", length, len(output))
+                LOG.info("full voice pipeline completed: elapsed=%.3fs", time.perf_counter() - started)
+            LOG.info(
+                "sending voice response: input=%d output=%d total_elapsed=%.3fs",
+                length,
+                len(output),
+                time.perf_counter() - request_started,
+            )
             self.send_response(200)
             self.send_header("Content-Type", "audio/wav")
             self.send_header("Content-Length", str(len(output)))
@@ -156,8 +199,12 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
-    LOG.info("loading local Malay TTS model")
+    logging.basicConfig(
+        level=os.getenv("LOG_LEVEL", "INFO"),
+        format="%(asctime)s %(levelname)s:%(name)s:%(message)s",
+        datefmt="%H:%M:%S",
+    )
+    warm_up_tts()
     LOG.info("bridge listening on http://%s:%d", HOST, PORT)
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
 
