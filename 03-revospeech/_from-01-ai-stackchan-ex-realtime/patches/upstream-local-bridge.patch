@@ -1,0 +1,324 @@
+RevoSpeech local STT/TTS bridge changes relative to the working OpenAI implementation.
+Apply from inside 01-ai-stackchan-ex-realtime/upstream/:
+
+  git apply /path/to/upstream-local-bridge.patch
+
+diff --git a/firmware/data/SC_ExConfig.yaml b/firmware/data/SC_ExConfig.yaml
+--- a/firmware/data/SC_ExConfig.yaml
++++ b/firmware/data/SC_ExConfig.yaml
+@@ -1,27 +1,22 @@
+-## App config for Realtime API (SPIFFS flat layout)
++## StackChan local Fedora bridge configuration
++
+ llm:
+-  type: 0               # 0:ChatGPT / OpenAI Realtime when built with REALTIME_API
++  type: 0
+   enableMemory: true
+-  # Leave empty for voice-only. For MCP SSE servers later:
+-  # mcpServers:
+-  #   [
+-  #     {
+-  #       "name": "local-mcp",
+-  #       "disabled": false,
+-  #       "url": "192.168.1.10",
+-  #       "port": 8000
+-  #     }
+-  #   ]
+   mcpServers: []
+ 
+ tts:
+-  type: 2
+-  model: "tts-1"
+-  voice: "alloy"
++  type: 5
++  model: "http://192.168.0.12:8787/v1/voice"
++  voice: "sarah"
+ 
+ stt:
+-  type: 1
++  type: 4
++  model: "http://192.168.0.12:8787/v1/transcribe"
+ 
+ wakeword:
+   type: 0
+   keyword: ""
++
++audio:
++  speaker_volume: 200
+diff --git a/firmware/platformio.ini b/firmware/platformio.ini
+--- a/firmware/platformio.ini
++++ b/firmware/platformio.ini
+@@ -154,6 +154,13 @@
+ lib_deps = 
+ 	${env:m5stack-cores3.lib_deps} ${llm_module.lib_deps}
+ 
++; Normal ChatGPT text flow with OpenAI STT and the Mac-local RevoSpeech TTS bridge.
++[env:m5stack-cores3-local-bridge]
++extends = env:m5stack-cores3
++build_flags = ${env:m5stack-cores3.build_flags}
++lib_deps = 
++	${env:m5stack-cores3.lib_deps}
++
+ [env:m5stack-cores3-realtime]
+ extends = env:m5stack-cores3, realtime_api
+ build_flags = ${env:m5stack-cores3.build_flags} ${realtime_api.build_flags}
+diff --git a/firmware/src/Robot.cpp b/firmware/src/Robot.cpp
+--- a/firmware/src/Robot.cpp
++++ b/firmware/src/Robot.cpp
+@@ -4,10 +4,12 @@
+ #include "tts/OpenAITTS.h"
+ #include "tts/UAquesTalkTTS.h"
+ #include "tts/ModuleLLMTTS.h"
++#include "tts/LocalBridgeTTS.h"
+ #include "stt/CloudSpeechClient.h"
+ #include "stt/Whisper.h"
+ #include "stt/ModuleLLMASR.h"
+ #include "stt/ModuleLLMWhisper.h"
++#include "stt/LocalBridgeSTT.h"
+ #include "driver/ModuleLLM.h"
+ #include "llm/LLMBase.h"
+ #include "llm/ChatGPT/ChatGPT.h"
+@@ -221,6 +223,9 @@
+     stt = nullptr;
+ #endif
+     break;
++  case STT_TYPE_LOCAL_BRIDGE:
++    stt = new LocalBridgeSTT(stt_param);
++    break;
+   default:
+     Serial.printf("Error: undefined STT type %d\n", stt_type);
+     stt = nullptr;
+@@ -265,6 +270,9 @@
+     tts = nullptr;
+ #endif
+     break;
++  case TTS_TYPE_LOCAL_BRIDGE:
++    tts = new LocalBridgeTTS(tts_param);
++    break;
+   default:
+     Serial.printf("Error: undefined TTS type %d\n", tts_type);
+     tts = nullptr;
+diff --git a/firmware/src/StackchanExConfig.h b/firmware/src/StackchanExConfig.h
+--- a/firmware/src/StackchanExConfig.h
++++ b/firmware/src/StackchanExConfig.h
+@@ -40,11 +40,13 @@
+ #define TTS_TYPE_OPENAI                 2
+ #define TTS_TYPE_AQUESTALK              3
+ #define TTS_TYPE_MODULE_LLM             4
++#define TTS_TYPE_LOCAL_BRIDGE           5
+ 
+ #define STT_TYPE_GOOGLE                 0
+ #define STT_TYPE_OPENAI_WHISPER         1
+ #define STT_TYPE_MODULE_LLM_ASR         2
+ #define STT_TYPE_MODULE_LLM_WHISPER     3
++#define STT_TYPE_LOCAL_BRIDGE           4
+ 
+ #define WAKEWORD_TYPE_SIMPLEVOX         0
+ #define WAKEWORD_TYPE_MODULE_LLM_KWS    1
+diff --git a/firmware/src/driver/AudioWhisper.cpp b/firmware/src/driver/AudioWhisper.cpp
+--- a/firmware/src/driver/AudioWhisper.cpp
++++ b/firmware/src/driver/AudioWhisper.cpp
+@@ -2,7 +2,8 @@
+ #include "AudioWhisper.h"
+ 
+ //constexpr size_t record_number = 300/2;
+-constexpr size_t record_number = 400;
++// Short test capture window: 200 * 150 / 16000 = about 1.9 seconds.
++constexpr size_t record_number = 200;
+ //constexpr size_t record_number = 200;
+ constexpr size_t record_length = 150;
+ constexpr size_t record_size = record_number * record_length;
+diff --git a/firmware/src/stt/Whisper.cpp b/firmware/src/stt/Whisper.cpp
+--- a/firmware/src/stt/Whisper.cpp
++++ b/firmware/src/stt/Whisper.cpp
+@@ -28,7 +28,7 @@
+   const String header = "--" + String(boundary) + "\r\n"
+     "Content-Disposition: form-data; name=\"model\"\r\n\r\nwhisper-1\r\n"
+     "--" + String(boundary) + "\r\n"
+-    "Content-Disposition: form-data; name=\"language\"\r\n\r\nja\r\n"
++    "Content-Disposition: form-data; name=\"language\"\r\n\r\nms\r\n"
+     "--" + String(boundary) + "\r\n"
+     "Content-Disposition: form-data; name=\"file\"; filename=\"speak.wav\"\r\n"
+     "Content-Type: application/octet-stream\r\n\r\n";
+diff --git a/firmware/src/stt/LocalBridgeSTT.h b/firmware/src/stt/LocalBridgeSTT.h
+new file mode 100644
+--- /dev/null
++++ b/firmware/src/stt/LocalBridgeSTT.h
+@@ -0,0 +1,10 @@
++#pragma once
++
++#include "STTBase.h"
++#include "driver/AudioWhisper.h"
++
++class LocalBridgeSTT : public STTBase {
++public:
++    explicit LocalBridgeSTT(stt_param_t param) : STTBase(param) {}
++    String speech_to_text() override;
++};
+diff --git a/firmware/src/stt/LocalBridgeSTT.cpp b/firmware/src/stt/LocalBridgeSTT.cpp
+new file mode 100644
+--- /dev/null
++++ b/firmware/src/stt/LocalBridgeSTT.cpp
+@@ -0,0 +1,38 @@
++#include "LocalBridgeSTT.h"
++
++#include <ArduinoJson.h>
++#include <HTTPClient.h>
++#include <WiFi.h>
++
++String LocalBridgeSTT::speech_to_text() {
++    AudioWhisper audio;
++    Serial.println("LocalBridgeSTT: recording");
++    audio.Record();
++
++    WiFiClient client;
++    HTTPClient http;
++    if (!http.begin(client, param.stt_conf.model)) {
++        Serial.println("LocalBridgeSTT: HTTP begin failed");
++        return "";
++    }
++    http.setTimeout(120000);
++    http.addHeader("Content-Type", "audio/wav");
++    const int status = http.POST(
++        const_cast<uint8_t*>(audio.GetBuffer()), audio.GetSize());
++    if (status != HTTP_CODE_OK) {
++        Serial.printf("LocalBridgeSTT: bridge HTTP status %d\n", status);
++        http.end();
++        return "";
++    }
++
++    const String body = http.getString();
++    http.end();
++    DynamicJsonDocument doc(1024);
++    if (deserializeJson(doc, body)) {
++        Serial.println("LocalBridgeSTT: invalid JSON response");
++        return "";
++    }
++    const String text = doc["text"].as<String>();
++    Serial.printf("LocalBridgeSTT: %s\n", text.c_str());
++    return text;
++}
+
+diff --git a/firmware/src/tts/LocalBridgeTTS.h b/firmware/src/tts/LocalBridgeTTS.h
+new file mode 100644
+--- /dev/null
++++ b/firmware/src/tts/LocalBridgeTTS.h
+@@ -0,0 +1,9 @@
++#pragma once
++
++#include "TTSBase.h"
++
++class LocalBridgeTTS : public TTSBase {
++public:
++    explicit LocalBridgeTTS(tts_param_t param) : TTSBase(param) {}
++    void stream(String text) override;
++};
+diff --git a/firmware/src/tts/LocalBridgeTTS.cpp b/firmware/src/tts/LocalBridgeTTS.cpp
+new file mode 100644
+--- /dev/null
++++ b/firmware/src/tts/LocalBridgeTTS.cpp
+@@ -0,0 +1,104 @@
++#include "LocalBridgeTTS.h"
++
++#include <HTTPClient.h>
++#include <M5Unified.h>
++#include <WiFi.h>
++
++namespace {
++constexpr size_t MAX_WAV_BYTES = 2 * 1024 * 1024;
++constexpr uint32_t BRIDGE_TIMEOUT_MS = 120000;
++
++uint32_t read_le32(const uint8_t* p) {
++    return static_cast<uint32_t>(p[0]) |
++           (static_cast<uint32_t>(p[1]) << 8) |
++           (static_cast<uint32_t>(p[2]) << 16) |
++           (static_cast<uint32_t>(p[3]) << 24);
++}
++
++uint16_t read_le16(const uint8_t* p) {
++    return static_cast<uint16_t>(p[0]) |
++           (static_cast<uint16_t>(p[1]) << 8);
++}
++}
++
++void LocalBridgeTTS::stream(String text) {
++    if (text.length() == 0 || param.model.length() == 0) {
++        Serial.println("LocalBridgeTTS: empty text or endpoint");
++        return;
++    }
++
++    WiFiClient client;
++    HTTPClient http;
++    if (!http.begin(client, param.model)) {
++        Serial.println("LocalBridgeTTS: HTTP begin failed");
++        return;
++    }
++
++    // RevoSpeech may need several seconds to synthesize a longer reply.
++    // HTTPClient's default timeout is too short for the complete POST/response.
++    http.setTimeout(BRIDGE_TIMEOUT_MS);
++    http.addHeader("Content-Type", "text/plain; charset=utf-8");
++    const int status = http.POST(text);
++    if (status != HTTP_CODE_OK) {
++        Serial.printf("LocalBridgeTTS: bridge HTTP status %d\n", status);
++        http.end();
++        return;
++    }
++
++    const int length = http.getSize();
++    if (length <= 44 || static_cast<size_t>(length) > MAX_WAV_BYTES) {
++        Serial.printf("LocalBridgeTTS: invalid WAV size %d\n", length);
++        http.end();
++        return;
++    }
++
++    uint8_t* wav = static_cast<uint8_t*>(heap_caps_malloc(
++        static_cast<size_t>(length), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
++    if (!wav) {
++        Serial.println("LocalBridgeTTS: cannot allocate WAV buffer");
++        http.end();
++        return;
++    }
++
++    WiFiClient* stream = http.getStreamPtr();
++    size_t received = 0;
++    const uint32_t deadline = millis() + 30000;
++    while (received < static_cast<size_t>(length) && millis() < deadline) {
++        const size_t available = stream->available();
++        if (available == 0) {
++            delay(2);
++            continue;
++        }
++        const size_t wanted = min(available, static_cast<size_t>(length) - received);
++        const int read = stream->readBytes(wav + received, wanted);
++        if (read <= 0) break;
++        received += static_cast<size_t>(read);
++    }
++    http.end();
++
++    if (received < 44 || memcmp(wav, "RIFF", 4) != 0 || memcmp(wav + 8, "WAVE", 4) != 0) {
++        Serial.println("LocalBridgeTTS: response is not a RIFF/WAVE file");
++        free(wav);
++        return;
++    }
++
++    uint16_t channels = read_le16(wav + 22);
++    uint16_t bits = read_le16(wav + 34);
++    uint32_t sample_rate = read_le32(wav + 24);
++    uint32_t data_offset = 44;
++    uint32_t data_size = read_le32(wav + 40);
++    if (channels != 1 || bits != 16 || data_offset + data_size > received) {
++        Serial.printf("LocalBridgeTTS: unsupported WAV channels=%u bits=%u\n", channels, bits);
++        free(wav);
++        return;
++    }
++
++    M5.Mic.end();
++    M5.Speaker.begin();
++    M5.Speaker.playRaw(reinterpret_cast<int16_t*>(wav + data_offset),
++                       data_size / sizeof(int16_t), sample_rate, false);
++    while (M5.Speaker.isPlaying()) delay(10);
++    M5.Speaker.end();
++    M5.Mic.begin();
++    free(wav);
++}
