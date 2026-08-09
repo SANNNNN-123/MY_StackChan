@@ -1,6 +1,6 @@
-## App config for Realtime API (SPIFFS flat layout)
+## App config for the normal text ChatGPT flow (SPIFFS flat layout)
 llm:
-  type: 0               # 0:ChatGPT / OpenAI Realtime when built with REALTIME_API
+  type: 0               # ChatGPT text API; use env m5stack-cores3-local-bridge
   enableMemory: true
   # Leave empty for voice-only. For MCP SSE servers later:
   # mcpServers:
@@ -15,13 +15,17 @@ llm:
   mcpServers: []
 
 tts:
-  type: 2
-  model: "tts-1"
-  voice: "alloy"
+  type: 5               # Local Mac bridge TTS (LocalBridgeTTS)
+  model: "http://192.168.1.10:8787/v1/voice"  # Mac LAN IP, not localhost
+  voice: "sarah"
 
 stt:
-  type: 1
+  type: 4               # Local Mac bridge RevoSpeech ASR
+  model: "http://192.168.1.10:8787/v1/transcribe"  # Mac LAN IP, not localhost
 
 wakeword:
   type: 0
   keyword: ""
+
+audio:
+  speaker_volume: 200
