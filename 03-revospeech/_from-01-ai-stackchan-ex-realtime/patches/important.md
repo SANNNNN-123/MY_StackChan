@@ -14,7 +14,7 @@ directory. Do not leave important changes only as uncommitted edits inside
 The reproducible workflow is:
 
 ```text
-clean upstream clone + patches/0001...0006.patch = working firmware
+clean upstream clone + patches/0001...0007.patch = working firmware
 ```
 
 ## Before changing upstream
@@ -38,6 +38,7 @@ clean upstream clone + patches/0001...0006.patch = working firmware
 0004-malay-default-role.patch
 0005-reduce-realtime-serial-logging.patch
 0006-revospeech-local-bridge.patch
+0007-chatgpt-latency-logging.patch
 ```
 
 New patches must use the next number and must be added to
