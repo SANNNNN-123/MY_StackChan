@@ -33,12 +33,12 @@ def load_dotenv() -> None:
 load_dotenv()
 
 from openai import OpenAI
-from revospeech import ASR, TTS
+from revospeech import TTS
 
 LOG = logging.getLogger("stackchan-bridge")
 HOST = os.getenv("STACKCHAN_BRIDGE_HOST", "0.0.0.0")
 PORT = int(os.getenv("STACKCHAN_BRIDGE_PORT", "8787"))
-ASR_MODEL = os.getenv("REVOSPEECH_ASR_MODEL", "zipformer-v2")
+ASR_MODEL = os.getenv("OPENAI_ASR_MODEL", "gpt-4o-transcribe")
 TEXT_MODEL = os.getenv("OPENAI_TEXT_MODEL", "gpt-4o-mini")
 SYSTEM_PROMPT = os.getenv(
     "STACKCHAN_SYSTEM_PROMPT",
@@ -47,12 +47,19 @@ SYSTEM_PROMPT = os.getenv(
 )
 
 OPENAI = OpenAI()
-ASR_ENGINE = ASR(ASR_MODEL)
 TTS_ENGINE = TTS("vits-ms")
 
 
 def transcribe_audio(wav_bytes: bytes) -> str:
-    return ASR_ENGINE.transcribe(io.BytesIO(wav_bytes)).text.strip()
+    audio_file = io.BytesIO(wav_bytes)
+    audio_file.name = "stackchan.wav"
+    transcript = OPENAI.audio.transcriptions.create(
+        model=ASR_MODEL,
+        file=audio_file,
+        response_format="json",
+        temperature=0,
+    )
+    return transcript.text.strip()
 
 
 def process_audio(wav_bytes: bytes) -> bytes:
@@ -126,15 +133,23 @@ class Handler(BaseHTTPRequestHandler):
                 output = synthesize_text(wav_bytes.decode("utf-8"))
             else:
                 output = process_audio(wav_bytes)
+            LOG.info("sending voice response: input=%d output=%d", length, len(output))
             self.send_response(200)
             self.send_header("Content-Type", "audio/wav")
             self.send_header("Content-Length", str(len(output)))
             self.end_headers()
             self.wfile.write(output)
             LOG.info("voice request completed: input=%d output=%d", length, len(output))
+        except BrokenPipeError:
+            # The ESP32 can time out and close the socket while VITS is
+            # synthesizing. There is no response left to send in that case.
+            LOG.warning("client disconnected before voice response was sent")
         except Exception as exc:  # bridge errors must be visible to the robot
             LOG.exception("voice request failed")
-            self._send_json(500, {"error": str(exc)})
+            try:
+                self._send_json(500, {"error": str(exc)})
+            except BrokenPipeError:
+                LOG.warning("client disconnected before error response was sent")
 
     def log_message(self, fmt: str, *args: object) -> None:
         LOG.info("%s - %s", self.address_string(), fmt % args)
