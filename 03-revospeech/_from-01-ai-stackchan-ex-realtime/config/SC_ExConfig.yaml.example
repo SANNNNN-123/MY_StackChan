@@ -1,6 +1,7 @@
 ## App config for the normal text ChatGPT flow (SPIFFS flat layout)
 llm:
   type: 0               # ChatGPT text API; use env m5stack-cores3-local-bridge
+  model: "gpt-4o-mini"  # Faster text model experiment; supports function calling
   enableMemory: true
   # Leave empty for voice-only. For MCP SSE servers later:
   # mcpServers:
