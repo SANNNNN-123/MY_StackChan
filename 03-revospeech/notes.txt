@@ -1,6 +1,18 @@
-/MY_StackChan/03-revospeech$ python bridge/server.py
+cd /home/zuhair/Desktop/project/MY_StackChan/03-revospeech
+uv run python bridge/server.py
 
+Keep it running.
 
+Terminal 2: flash the experimental firmware:
 
+cd /home/zuhair/Desktop/project/MY_StackChan/03-revospeech/_from-01-ai-stackchan-ex-realtime
+./scripts/flash.sh
 
-MY_StackChan/01-ai-stackchan-ex-realtime$ ./scripts/flash.sh
+Before flashing, confirm local/SC_ExConfig.yaml points to your computer’s LAN IP:
+
+http://YOUR_COMPUTER_LAN_IP:8787/v1/voice
+http://YOUR_COMPUTER_LAN_IP:8787/v1/transcribe
+
+Also make sure OPENAI_API_KEY is available in:
+
+03-revospeech/.env
