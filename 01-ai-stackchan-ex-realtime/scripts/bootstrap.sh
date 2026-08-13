@@ -35,23 +35,32 @@ apply_patch() {
   fi
 }
 
-# Upstream now ships CoreS3 SD→SPIFFS fallback itself (load_system_config).
-# Keep 0001 only as a historical record for older clones.
-if grep -q 'Loading config from SPIFFS' firmware/src/main.cpp 2>/dev/null; then
-  echo "Skipping 0001-cores3-spiffs-config-fallback.patch (already in upstream)"
-else
-  echo "Upstream lacks SPIFFS fallback; applying 0001"
-  apply_patch "$ROOT/patches/0001-cores3-spiffs-config-fallback.patch"
-fi
-
-if grep -q 'Bahasa Melayu Malaysia' firmware/src/llm/ChatGPT/RealtimeChatGPT.cpp 2>/dev/null; then
-  echo "Skipping 0002-english-default-role.patch (Malay role already installed)"
-else
-  apply_patch "$ROOT/patches/0002-english-default-role.patch"
-fi
-apply_patch "$ROOT/patches/0003-realtime-audio-playback-queue.patch"
-apply_patch "$ROOT/patches/0004-malay-default-role.patch"
-apply_patch "$ROOT/patches/0005-reduce-realtime-serial-logging.patch"
+# Apply every patch in lexical order so adding a numbered patch does not
+# require editing this script. The first two retain their upstream-specific
+# compatibility checks.
+for patch in "$ROOT"/patches/*.patch; do
+  [[ -f "$patch" ]] || continue
+  name="$(basename "$patch")"
+  case "$name" in
+    0001-*)
+      if grep -q 'Loading config from SPIFFS' firmware/src/main.cpp 2>/dev/null; then
+        echo "Skipping $name (already in upstream)"
+      else
+        apply_patch "$patch"
+      fi
+      ;;
+    0002-*)
+      if grep -q 'Bahasa Melayu Malaysia' firmware/src/llm/ChatGPT/RealtimeChatGPT.cpp 2>/dev/null; then
+        echo "Skipping $name (Malay role already installed)"
+      else
+        apply_patch "$patch"
+      fi
+      ;;
+    *)
+      apply_patch "$patch"
+      ;;
+  esac
+done
 
 # Select the original OpenAI Realtime audio model. Keep this idempotent so a
 # rerun after a partial bootstrap restores the original model if necessary.
