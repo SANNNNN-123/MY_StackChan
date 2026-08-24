@@ -1,0 +1,122 @@
+diff --git a/firmware/lib/m5stack-avatar/src/Face.cpp b/firmware/lib/m5stack-avatar/src/Face.cpp
+index 6d037b7..4d0c5c1 100644
+--- a/firmware/lib/m5stack-avatar/src/Face.cpp
++++ b/firmware/lib/m5stack-avatar/src/Face.cpp
+@@ -3,6 +3,7 @@
+ // license information.
+ 
+ #include "Face.h"
++#include "GrokEye.h"
+ 
+ namespace m5avatar {
+ Balloon b;
+@@ -13,8 +14,8 @@ BoundingRect br;
+ 
+ Face::Face()
+     : Face(new Mouth(50, 90, 4, 60), new BoundingRect(148, 163),
+-           new Eye(8, false), new BoundingRect(93, 90), 
+-           new Eye(8, true), new BoundingRect(96, 230), 
++           new GrokEye(false), new BoundingRect(93, 90),
++           new GrokEye(true), new BoundingRect(96, 230),
+            new Eyeblow(32, 0, false), new BoundingRect(67, 96), 
+            new Eyeblow(32, 0, true), new BoundingRect(72, 230)) {}
+ 
+diff --git a/firmware/lib/m5stack-avatar/src/GrokEye.cpp b/firmware/lib/m5stack-avatar/src/GrokEye.cpp
+new file mode 100644
+index 0000000..7f311c1
+--- /dev/null
++++ b/firmware/lib/m5stack-avatar/src/GrokEye.cpp
+@@ -0,0 +1,60 @@
++#include "GrokEye.h"
++
++#include <stdint.h>
++
++namespace m5avatar {
++namespace {
++
++struct Point {
++  int8_t x;
++  int8_t y;
++};
++
++// Compact approximation of expression 00 from the GrokBot Avatar Lab.
++// Coordinates are centered on each eye and intentionally stored as int8_t.
++const Point kNeutralEye[] PROGMEM = {
++    {-18, -8}, {-14, -16}, {-6, -20}, {4, -19},  {12, -15}, {17, -8},
++    {18, 0},   {16, 8},    {11, 15},  {3, 19},    {-6, 19},  {-14, 15},
++    {-18, 8},  {-20, 0},
++};
++
++constexpr size_t kNeutralEyePointCount = sizeof(kNeutralEye) / sizeof(kNeutralEye[0]);
++
++void drawFilledContour(M5Canvas *spi, int cx, int cy, float scaleY,
++                       uint16_t color) {
++  int firstX = cx + kNeutralEye[0].x;
++  int firstY = cy + static_cast<int>(kNeutralEye[0].y * scaleY);
++  for (size_t i = 1; i + 1 < kNeutralEyePointCount; ++i) {
++    int x1 = cx + kNeutralEye[i].x;
++    int y1 = cy + static_cast<int>(kNeutralEye[i].y * scaleY);
++    int x2 = cx + kNeutralEye[i + 1].x;
++    int y2 = cy + static_cast<int>(kNeutralEye[i + 1].y * scaleY);
++    spi->fillTriangle(firstX, firstY, x1, y1, x2, y2, color);
++  }
++}
++
++}  // namespace
++
++GrokEye::GrokEye(bool isLeft) : isLeft{isLeft} {}
++
++void GrokEye::draw(M5Canvas *spi, BoundingRect rect, DrawContext *ctx) {
++  const int cx = rect.getCenterX();
++  const int cy = rect.getCenterY();
++  const Gaze gaze = ctx->getGaze();
++  const int gazeX = static_cast<int>(gaze.getHorizontal() * 3.0f);
++  const int gazeY = static_cast<int>(gaze.getVertical() * 3.0f);
++  const float openRatio = constrain(ctx->getEyeOpenRatio(), 0.04f, 1.0f);
++  const uint16_t primaryColor =
++      ctx->getColorDepth() == 1 ? 1 : ctx->getColorPalette()->get(COLOR_PRIMARY);
++
++  // Keep the first patch neutral: expression-specific contours are added next.
++  (void)isLeft;
++  if (openRatio <= 0.05f) {
++    spi->fillRect(cx - 18 + gazeX, cy - 2 + gazeY, 36, 4, primaryColor);
++    return;
++  }
++
++  drawFilledContour(spi, cx + gazeX, cy + gazeY, openRatio, primaryColor);
++}
++
++}  // namespace m5avatar
+diff --git a/firmware/lib/m5stack-avatar/src/GrokEye.h b/firmware/lib/m5stack-avatar/src/GrokEye.h
+new file mode 100644
+index 0000000..38cc610
+--- /dev/null
++++ b/firmware/lib/m5stack-avatar/src/GrokEye.h
+@@ -0,0 +1,27 @@
++#ifndef GROK_EYE_H_
++#define GROK_EYE_H_
++
++#include "DrawContext.h"
++#include "Drawable.h"
++
++namespace m5avatar {
++
++// First proof-of-concept renderer for the GrokBot neutral eye contour.
++// The contour is kept in flash and rasterized as a small triangle fan.
++class GrokEye final : public Drawable {
++ private:
++  bool isLeft;
++
++ public:
++  GrokEye(bool isLeft);
++  ~GrokEye() = default;
++  GrokEye(const GrokEye &other) = default;
++  GrokEye &operator=(const GrokEye &other) = default;
++
++  void draw(M5Canvas *spi, BoundingRect rect,
++            DrawContext *drawContext) override;
++};
++
++}  // namespace m5avatar
++
++#endif  // GROK_EYE_H_

@@ -1,0 +1,113 @@
+--- a/firmware/lib/m5stack-avatar/src/GrokEye.cpp
++++ b/firmware/lib/m5stack-avatar/src/GrokEye.cpp
+@@ -10,25 +10,76 @@
+   int8_t y;
+ };
+ 
+-// Compact approximation of expression 00 from the GrokBot Avatar Lab.
+-// Coordinates are centered on each eye and intentionally stored as int8_t.
++// Compact approximations of the six expression contours used by the first
++// GrokBot Avatar Lab port. Coordinates are centered on each eye and stored as
++// int8_t so the tables remain in flash.
+ const Point kNeutralEye[] PROGMEM = {
+     {-18, -8}, {-14, -16}, {-6, -20}, {4, -19},  {12, -15}, {17, -8},
+     {18, 0},   {16, 8},    {11, 15},  {3, 19},    {-6, 19},  {-14, 15},
+     {-18, 8},  {-20, 0},
+ };
+ 
++const Point kHappyEye[] PROGMEM = {
++    {-19, 5}, {-14, 0}, {-7, -3}, {0, -4}, {8, -2}, {15, 2}, {19, 7},
++    {15, 12}, {8, 15}, {0, 16}, {-8, 14}, {-15, 10},
++};
++
++const Point kAngryEye[] PROGMEM = {
++    {-19, -13}, {-10, -9}, {-2, -5}, {7, -2}, {16, 1}, {19, 5},
++    {14, 12}, {5, 13}, {-4, 10}, {-12, 5}, {-19, -2},
++};
++
++const Point kSadEye[] PROGMEM = {
++    {-19, 1}, {-12, -5}, {-4, -9}, {5, -12}, {14, -13}, {19, -10},
++    {16, -3}, {10, 5}, {2, 11}, {-7, 14}, {-15, 12}, {-20, 7},
++};
++
++const Point kDoubtEye[] PROGMEM = {
++    {-19, -4}, {-13, -11}, {-5, -14}, {4, -13}, {12, -9}, {19, -3},
++    {15, 5}, {8, 10}, {-1, 11}, {-10, 8}, {-17, 3}, {-20, -1},
++};
++
++const Point kSleepyEye[] PROGMEM = {
++    {-19, -2}, {-13, -6}, {-5, -8}, {4, -8}, {13, -5}, {19, -1},
++    {14, 3}, {6, 5}, {-4, 5}, {-13, 3},
++};
++
+ constexpr size_t kNeutralEyePointCount = sizeof(kNeutralEye) / sizeof(kNeutralEye[0]);
+ 
+-void drawFilledContour(M5Canvas *spi, int cx, int cy, float scaleY,
+-                       uint16_t color) {
+-  int firstX = cx + kNeutralEye[0].x;
+-  int firstY = cy + static_cast<int>(kNeutralEye[0].y * scaleY);
+-  for (size_t i = 1; i + 1 < kNeutralEyePointCount; ++i) {
+-    int x1 = cx + kNeutralEye[i].x;
+-    int y1 = cy + static_cast<int>(kNeutralEye[i].y * scaleY);
+-    int x2 = cx + kNeutralEye[i + 1].x;
+-    int y2 = cy + static_cast<int>(kNeutralEye[i + 1].y * scaleY);
++const Point *contourForExpression(Expression expression, bool isLeft,
++                                   size_t *pointCount) {
++  switch (expression) {
++    case Expression::Happy:
++      *pointCount = sizeof(kHappyEye) / sizeof(kHappyEye[0]);
++      return kHappyEye;
++    case Expression::Angry:
++      *pointCount = sizeof(kAngryEye) / sizeof(kAngryEye[0]);
++      return kAngryEye;
++    case Expression::Sad:
++      *pointCount = sizeof(kSadEye) / sizeof(kSadEye[0]);
++      return isLeft ? kSadEye : kDoubtEye;
++    case Expression::Doubt:
++      *pointCount = sizeof(kDoubtEye) / sizeof(kDoubtEye[0]);
++      return isLeft ? kDoubtEye : kSadEye;
++    case Expression::Sleepy:
++      *pointCount = sizeof(kSleepyEye) / sizeof(kSleepyEye[0]);
++      return kSleepyEye;
++    case Expression::Neutral:
++    default:
++      *pointCount = kNeutralEyePointCount;
++      return kNeutralEye;
++  }
++}
++
++void drawFilledContour(M5Canvas *spi, const Point *contour, size_t pointCount,
++                       int cx, int cy, float scaleY, uint16_t color) {
++  int firstX = cx + contour[0].x;
++  int firstY = cy + static_cast<int>(contour[0].y * scaleY);
++  for (size_t i = 1; i + 1 < pointCount; ++i) {
++    int x1 = cx + contour[i].x;
++    int y1 = cy + static_cast<int>(contour[i].y * scaleY);
++    int x2 = cx + contour[i + 1].x;
++    int y2 = cy + static_cast<int>(contour[i + 1].y * scaleY);
+     spi->fillTriangle(firstX, firstY, x1, y1, x2, y2, color);
+   }
+ }
+@@ -44,17 +95,19 @@
+   const int gazeX = static_cast<int>(gaze.getHorizontal() * 3.0f);
+   const int gazeY = static_cast<int>(gaze.getVertical() * 3.0f);
+   const float openRatio = constrain(ctx->getEyeOpenRatio(), 0.04f, 1.0f);
++  size_t pointCount = 0;
++  const Point *contour = contourForExpression(ctx->getExpression(), isLeft,
++                                              &pointCount);
+   const uint16_t primaryColor =
+       ctx->getColorDepth() == 1 ? 1 : ctx->getColorPalette()->get(COLOR_PRIMARY);
+ 
+-  // Keep the first patch neutral: expression-specific contours are added next.
+-  (void)isLeft;
+   if (openRatio <= 0.05f) {
+     spi->fillRect(cx - 18 + gazeX, cy - 2 + gazeY, 36, 4, primaryColor);
+     return;
+   }
+ 
+-  drawFilledContour(spi, cx + gazeX, cy + gazeY, openRatio, primaryColor);
++  drawFilledContour(spi, contour, pointCount, cx + gazeX, cy + gazeY,
++                    openRatio, primaryColor);
+ }
+ 
+ }  // namespace m5avatar
