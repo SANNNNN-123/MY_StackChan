@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>StackChan Timer UI Preview</title>
+  <style>
+    :root {
+      --screen: 240px;
+      --bg: #08090b;
+      --panel: #15171c;
+      --line: #30343d;
+      --text: #f4fbfb;
+      --muted: #9badb0;
+      --accent: #f4fbfb;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: #101216;
+      color: var(--text);
+      font: 500 14px system-ui, sans-serif;
+    }
+
+    .screen {
+      width: var(--screen);
+      height: var(--screen);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 25px 22px 20px;
+      border: 8px solid #171a20;
+      border-radius: 20px;
+      background: radial-gradient(circle at 50% 35%, #2b1e26 0, var(--bg) 58%);
+      box-shadow: 0 24px 60px #000b;
+      user-select: none;
+    }
+
+    .timer {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-top: 10px;
+      color: var(--accent);
+      text-shadow: 0 0 12px #f4fbfb55;
+    }
+
+    .time-group {
+      display: flex;
+      position: relative;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      width: 70px;
+      height: 92px;
+    }
+
+    .time-group small {
+      position: absolute;
+      top: 74px;
+      left: 52px;
+      margin: 0;
+      color: #43e06b;
+      font: 700 8px/1 system-ui, sans-serif;
+      letter-spacing: .12em;
+      transform: translateX(-50%);
+    }
+
+    .colon {
+      position: relative;
+      width: 10px;
+      height: 52px;
+      margin: 0 5px;
+    }
+
+    .colon::before,
+    .colon::after {
+      content: "";
+      position: absolute;
+      left: 2px;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 8px #f4fbfb88;
+    }
+
+    .colon::before { top: 15px; }
+    .colon::after { bottom: 15px; }
+
+    .digit {
+      position: relative;
+      width: 30px;
+      height: 52px;
+    }
+
+    .seg {
+      position: absolute;
+      display: block;
+      background: #283036;
+      opacity: .3;
+      transition: background .12s linear, opacity .12s linear;
+    }
+
+    .seg.on {
+      background: var(--accent);
+      opacity: 1;
+      box-shadow: 0 0 7px #f4fbfb66;
+    }
+
+    .seg.a, .seg.g, .seg.d {
+      left: 5px;
+      width: 20px;
+      height: 6px;
+      clip-path: polygon(16% 0, 84% 0, 100% 50%, 84% 100%, 16% 100%, 0 50%);
+    }
+
+    .seg.a { top: 0; }
+    .seg.g { top: 23px; }
+    .seg.d { bottom: 0; }
+
+    .seg.f, .seg.e, .seg.b, .seg.c {
+      width: 6px;
+      height: 20px;
+      clip-path: polygon(50% 0, 100% 16%, 100% 84%, 50% 100%, 0 84%, 0 16%);
+    }
+
+    .seg.f { left: 0; top: 4px; }
+    .seg.e { left: 0; bottom: 4px; }
+    .seg.b { right: 0; top: 4px; }
+    .seg.c { right: 0; bottom: 4px; }
+    }
+
+    .controls {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 18px;
+      margin-top: 22px;
+    }
+
+    button {
+      border: 1px solid var(--line);
+      color: var(--text);
+      background: var(--panel);
+      font: inherit;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    button:active { transform: scale(.95); }
+
+    .step {
+      width: 38px;
+      height: 38px;
+      border-radius: 50%;
+      font-size: 24px;
+      line-height: 1;
+    }
+
+    .step:disabled { opacity: .35; cursor: default; }
+
+    .start {
+      width: 126px;
+      height: 38px;
+      margin-top: 22px;
+      border: 0;
+      border-radius: 19px;
+      color: #08090b;
+      background: var(--accent);
+      font-weight: 800;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .start:disabled { opacity: .35; cursor: default; }
+
+  </style>
+</head>
+<body>
+  <main class="screen" aria-label="StackChan timer screen">
+    <div class="timer" aria-label="Timer">
+      <div class="time-group">
+        <div class="digit" data-digit="0"><i class="seg a"></i><i class="seg b"></i><i class="seg c"></i><i class="seg d"></i><i class="seg e"></i><i class="seg f"></i><i class="seg g"></i></div>
+        <div class="digit" data-digit="1"><i class="seg a"></i><i class="seg b"></i><i class="seg c"></i><i class="seg d"></i><i class="seg e"></i><i class="seg f"></i><i class="seg g"></i></div>
+        <small>MIN</small>
+      </div>
+      <span class="colon" aria-hidden="true"></span>
+      <div class="time-group">
+        <div class="digit" data-digit="0"><i class="seg a"></i><i class="seg b"></i><i class="seg c"></i><i class="seg d"></i><i class="seg e"></i><i class="seg f"></i><i class="seg g"></i></div>
+        <div class="digit" data-digit="0"><i class="seg a"></i><i class="seg b"></i><i class="seg c"></i><i class="seg d"></i><i class="seg e"></i><i class="seg f"></i><i class="seg g"></i></div>
+        <small>SEC</small>
+      </div>
+    </div>
+
+    <div class="controls" aria-label="Timer duration">
+      <button class="step" id="minus" type="button" aria-label="Decrease time">−</button>
+      <button class="step" id="plus" type="button" aria-label="Increase time">+</button>
+    </div>
+
+    <button class="start" id="start" type="button">Start</button>
+  </main>
+
+  <script>
+    const digits = document.querySelectorAll('.digit');
+    const segmentMap = ['abcdef', 'bc', 'abdeg', 'abcdg', 'bcfg', 'acdfg', 'acdefg', 'abc', 'abcdefg', 'abcdfg'];
+    const minus = document.querySelector('#minus');
+    const plus = document.querySelector('#plus');
+    const start = document.querySelector('#start');
+
+    const MIN_MINUTES = 0;
+    const MAX_MINUTES = 60;
+    let duration = 0;
+    let remaining = duration;
+    let running = false;
+    let interval;
+
+    function render() {
+      const minutes = Math.floor(remaining / 60).toString().padStart(2, '0');
+      const seconds = (remaining % 60).toString().padStart(2, '0');
+      `${minutes}${seconds}`.split('').forEach((value, index) => {
+        const active = segmentMap[Number(value)];
+        digits[index].dataset.digit = value;
+        digits[index].querySelectorAll('.seg').forEach(segment => {
+          segment.classList.toggle('on', active.includes(segment.classList[1]));
+        });
+      });
+      start.textContent = running ? 'Pause' : 'Start';
+      start.disabled = !running && duration === 0;
+      minus.disabled = running || duration <= MIN_MINUTES * 60;
+      plus.disabled = running || duration >= MAX_MINUTES * 60;
+    }
+
+    function adjust(minutes) {
+      if (running) return;
+      duration = Math.max(MIN_MINUTES * 60,
+        Math.min(MAX_MINUTES * 60, duration + minutes * 60));
+      remaining = duration;
+      render();
+    }
+
+    function toggle() {
+      if (duration === 0) return;
+      if (remaining === 0) remaining = duration;
+      running = !running;
+      clearInterval(interval);
+      if (running) {
+        interval = setInterval(() => {
+          remaining = Math.max(0, remaining - 1);
+          if (remaining === 0) {
+            running = false;
+            clearInterval(interval);
+          }
+          render();
+        }, 1000);
+      }
+      render();
+    }
+
+    minus.addEventListener('click', () => adjust(-1));
+    plus.addEventListener('click', () => adjust(1));
+    start.addEventListener('click', toggle);
+    render();
+  </script>
+</body>
+</html>
