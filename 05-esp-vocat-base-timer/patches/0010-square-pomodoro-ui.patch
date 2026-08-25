@@ -1,0 +1,687 @@
+diff --git a/firmware/src/mod/Pomodoro/PomodoroMod.h b/firmware/src/mod/Pomodoro/PomodoroMod.h
+index 41d0f3d..4c3c437 100644
+--- a/firmware/src/mod/Pomodoro/PomodoroMod.h
++++ b/firmware/src/mod/Pomodoro/PomodoroMod.h
+@@ -2,10 +2,16 @@
+ #define _POMODORO_MOD_H
+ 
+ #include <Arduino.h>
++#include <M5GFX.h>
+ #include "mod/ModBase.h"
+ 
+-#define POMODORO_TIMER_25MIN    (25*60*1000)
+-#define POMODORO_TIMER_5MIN    (5*60*1000)
++namespace m5avatar {
++class BoundingRect;
++class DrawContext;
++}
++
++#define POMODORO_TIMER_25MIN    (1*60*1000)
++#define POMODORO_TIMER_5MIN    (1*60*1000)
+ 
+ typedef enum {
+     READY,
+@@ -19,10 +25,16 @@ private:
+     box_t box_stt;
+     box_t box_BtnA;
+     box_t box_BtnC;
++    box_t box_minus;
++    box_t box_plus;
++    box_t box_start;
+ 
+     PomodoroStatus status;
+     String avatarText;
+     TimerHandle_t xTimer;
++    TickType_t pausedRemaining;
++    uint32_t selectedDurationMs;
++    bool isPaused;
+     bool isOffline;
+     bool isSilentMode;
+ public:
+@@ -37,8 +49,16 @@ public:
+     void idle(void);
+ 
+ private :
++    static void drawTimerUi(M5Canvas *spi, m5avatar::BoundingRect rect,
++                            m5avatar::DrawContext *ctx, void *userData);
++    static void drawDigitalTimerUi(M5Canvas *spi, m5avatar::BoundingRect rect,
++                                   m5avatar::DrawContext *ctx, void *userData);
++    void adjustDuration(int32_t minutes);
++    void startTimer(TickType_t duration, PomodoroStatus nextStatus);
++    void stopTimer(void);
++    void updateTimerUi(void);
+     void notification(String text, String mp3name);
+ };
+ 
+ 
+-#endif  //_POMODORO_MOD_H
+\ No newline at end of file
++#endif  //_POMODORO_MOD_H
+diff --git a/firmware/src/mod/Pomodoro/PomodoroMod.cpp b/firmware/src/mod/Pomodoro/PomodoroMod.cpp
+index bb12045..8702dca 100644
+--- a/firmware/src/mod/Pomodoro/PomodoroMod.cpp
++++ b/firmware/src/mod/Pomodoro/PomodoroMod.cpp
+@@ -9,10 +9,13 @@
+ //#include "driver/WakeWord.h"
+ #include "driver/PlayMP3.h"
+ #include <WiFiClientSecure.h>
++#include <cmath>
++#include <cstring>
+ 
+ #include "driver/AudioWhisper.h"       //speechToText
+ #include "stt/Whisper.h"               //speechToText
+ #include "driver/Audio.h"              //speechToText
++#include "share/DigitalTimerUi.h"
+ #include "stt/CloudSpeechClient.h"     //speechToText
+ #include "rootCA/rootCACertificate.h"  //speechToText
+ #include "rootCA/rootCAgoogle.h"       //speechToText
+@@ -28,6 +31,7 @@ extern Avatar avatar;
+ extern bool servo_home;
+ extern bool wakeword_is_enable;
+ extern void sw_tone();
++extern void alarm_tone();
+ ///////////////
+ 
+ static bool pomodoroTimerCallbacked = false;
+@@ -41,37 +45,221 @@ void pomodoroTimerCallback(TimerHandle_t _xTimer){
+ 
+ PomodoroMod::PomodoroMod(bool _isOffline)
+   : isOffline{_isOffline},
+-    isSilentMode{true}
++    isSilentMode{false},
++    xTimer{NULL},
++    pausedRemaining{0},
++    selectedDurationMs{0},
++    isPaused{false}
+ {
+   box_servo.setupBox(80, 120, 80, 80);
+   box_stt.setupBox(0, 0, M5.Display.width(), 60);
+   box_BtnA.setupBox(0, 100, 40, 60);
+   box_BtnC.setupBox(280, 100, 40, 60);
++  box_minus.setupBox(108, 140, 48, 48);
++  box_plus.setupBox(164, 140, 48, 48);
++  box_start.setupBox(78, 195, 164, 45);
+ 
+ }
+ 
+ 
+ void PomodoroMod::init(void)
+ {
+-  avatar.setSpeechText("Pomodoro Timer");
+-  delay(1000);
+-  xTimer = NULL;
++  stopTimer();
+   status = READY;
+-  avatar.setSpeechFont(&fonts::efontJA_12);
++  selectedDurationMs = 0;
++  pausedRemaining = 0;
++  isPaused = false;
++  avatar.setSpeechFont(&fonts::efontJA_16);
++  avatar.set_isSubWindowEnable(true);
++  updateTimerUi();
+ }
+ 
+ void PomodoroMod::pause(void)
+ {
+-  if((status == TIMER25) || (status == TIMER5)){
++  stopTimer();
++  status = READY;
++  avatar.set_isSubWindowEnable(false);
++  avatar.setSpeechFont(&fonts::efontJA_16);
++  avatar.setSpeechText("");
++}
++
++void PomodoroMod::startTimer(TickType_t duration, PomodoroStatus nextStatus)
++{
++  stopTimer();
++  xTimer = xTimerCreate("Timer", duration, pdFALSE, 0, pomodoroTimerCallback);
++  if(xTimer == NULL || xTimerStart(xTimer, 0) != pdPASS){
++    stopTimer();
++    status = READY;
++    avatar.setExpression(Expression::Sad);
++    avatar.setSpeechText("Timer setup failed");
++    delay(1500);
++    avatar.setExpression(Expression::Neutral);
++    return;
++  }
++  status = nextStatus;
++  isPaused = false;
++  pausedRemaining = 0;
++}
++
++void PomodoroMod::stopTimer(void)
++{
++  if(xTimer != NULL){
+     xTimerStop(xTimer, 0);
+     xTimerDelete(xTimer, 0);
+     xTimer = NULL;
+-    status = READY;
+   }
++}
+ 
+-  avatar.setSpeechFont(&fonts::efontJA_16);
+-  avatar.setSpeechText("");
+-  //avatar_stop();
++void PomodoroMod::updateTimerUi(void)
++{
++  avatar.updateSubWindowCustom(drawDigitalTimerUi, this, 0, 0,
++                               M5.Display.width(), M5.Display.height());
++}
++
++void PomodoroMod::drawDigitalTimerUi(M5Canvas *spi, m5avatar::BoundingRect rect,
++                                     m5avatar::DrawContext * /*ctx*/, void *userData)
++{
++  PomodoroMod *pomodoro = static_cast<PomodoroMod *>(userData);
++  uint32_t seconds = 0;
++  if (pomodoro->xTimer != NULL && xTimerIsTimerActive(pomodoro->xTimer) != pdFALSE) {
++    TickType_t remaining = xTimerGetExpiryTime(pomodoro->xTimer) - xTaskGetTickCount();
++    seconds = (remaining + configTICK_RATE_HZ - 1) / configTICK_RATE_HZ;
++  } else if (pomodoro->isPaused) {
++    seconds = (pomodoro->pausedRemaining + configTICK_RATE_HZ - 1) / configTICK_RATE_HZ;
++  } else {
++    seconds = pomodoro->selectedDurationMs / 1000;
++  }
++  uint32_t totalSeconds = pomodoro->selectedDurationMs / 1000;
++  if (pomodoro->xTimer != NULL) {
++    totalSeconds = (xTimerGetPeriod(pomodoro->xTimer) + configTICK_RATE_HZ - 1)
++                   / configTICK_RATE_HZ;
++  }
++  drawDigitalTimerUiCore(spi, rect, seconds, totalSeconds);
++}
++void PomodoroMod::adjustDuration(int32_t minutes)
++{
++  if (status != READY || isPaused) return;
++  int32_t duration = static_cast<int32_t>(selectedDurationMs / 60000) + minutes;
++  if (duration < 0) duration = 0;
++  if (duration > 60) duration = 60;
++  selectedDurationMs = static_cast<uint32_t>(duration) * 60000;
++  updateTimerUi();
++}
++
++void PomodoroMod::drawTimerUi(M5Canvas *spi, m5avatar::BoundingRect rect,
++                              m5avatar::DrawContext * /*ctx*/, void *userData)
++{
++  PomodoroMod *pomodoro = static_cast<PomodoroMod *>(userData);
++  const int32_t left = rect.getLeft();
++  const int32_t top = rect.getTop();
++  const int32_t width = rect.getWidth();
++  const int32_t height = rect.getHeight();
++  const int32_t side = (width < height ? width : height) - 16;
++  const int32_t squareLeft = left + (width - side) / 2;
++  const int32_t squareTop = top + (height - side) / 2;
++  const int32_t radius = 22;
++  const float pi = 3.14159265359f;
++  const float straight = static_cast<float>(side - 2 * radius);
++  const float arc = pi * radius / 2.0f;
++  const float perimeter = 4.0f * straight + 4.0f * arc;
++
++  struct Point { float x; float y; };
++  auto pointAt = [&](float distance) -> Point {
++    while (distance < 0) distance += perimeter;
++    while (distance >= perimeter) distance -= perimeter;
++    const float x = squareLeft;
++    const float y = squareTop;
++    const float right = squareLeft + side;
++    const float bottom = squareTop + side;
++    const float r = radius;
++    const float topEnd = right - r;
++    const float bottomEnd = right - r;
++    const float segments[] = { straight / 2.0f, arc, straight, arc, straight, arc, straight, arc, straight / 2.0f };
++    float d = distance;
++    for (int i = 0; i < 9; ++i) {
++      if (d <= segments[i]) {
++        const float t = segments[i] > 0 ? d / segments[i] : 0;
++        switch (i) {
++          case 0: return { squareLeft + side / 2.0f + (topEnd - (squareLeft + side / 2.0f)) * t, y };
++          case 1: {
++            const float a = -pi / 2.0f + (pi / 2.0f) * t;
++            return { topEnd + r * cosf(a), y + r + r * sinf(a) };
++          }
++          case 2: return { right, y + r + straight * t };
++          case 3: {
++            const float a = (pi / 2.0f) * t;
++            return { right - r + r * cosf(a), bottom - r + r * sinf(a) };
++          }
++          case 4: return { bottomEnd - straight * t, bottom };
++          case 5: {
++            const float a = pi / 2.0f + (pi / 2.0f) * t;
++            return { squareLeft + r + r * cosf(a), bottom - r + r * sinf(a) };
++          }
++          case 6: return { x, bottom - r - straight * t };
++          case 7: {
++            const float a = pi + (pi / 2.0f) * t;
++            return { squareLeft + r + r * cosf(a), y + r + r * sinf(a) };
++          }
++          default: return { topEnd - (topEnd - (squareLeft + side / 2.0f)) * t, y };
++        }
++      }
++      d -= segments[i];
++    }
++    return { squareLeft + side / 2.0f, static_cast<float>(squareTop) };
++  };
++
++  spi->fillRect(left, top, width, height, TFT_BLACK);
++  spi->drawRoundRect(squareLeft, squareTop, side, side, radius, 0x39C7);
++
++  uint32_t seconds = 0;
++  float fraction = 0.0f;
++  if (pomodoro->xTimer != NULL && xTimerIsTimerActive(pomodoro->xTimer) != pdFALSE) {
++    TickType_t remaining = xTimerGetExpiryTime(pomodoro->xTimer) - xTaskGetTickCount();
++    seconds = (remaining + configTICK_RATE_HZ - 1) / configTICK_RATE_HZ;
++    const uint32_t duration = pomodoro->status == TIMER5 ? 5 * 60 : 25 * 60;
++    fraction = 1.0f - static_cast<float>(seconds) / duration;
++    if (fraction < 0.0f) fraction = 0.0f;
++    if (fraction > 1.0f) fraction = 1.0f;
++  }
++
++  for (int i = 0; i < 100; ++i) {
++    const float f = static_cast<float>(i) / 100.0f;
++    const Point p = pointAt(f * perimeter);
++    const Point before = pointAt(f * perimeter - 1.0f);
++    const Point after = pointAt(f * perimeter + 1.0f);
++    const float tx = after.x - before.x;
++    const float ty = after.y - before.y;
++    const float tangentLength = sqrtf(tx * tx + ty * ty);
++    const float length = tangentLength > 0.0f ? tangentLength : 1.0f;
++    const float nx = -ty / length;
++    const float ny = tx / length;
++    const float mark = i % 20 == 0 ? 8.0f : i % 4 == 0 ? 5.0f : i % 2 == 0 ? 3.5f : 2.5f;
++    const uint16_t color = i % 20 == 0 ? TFT_WHITE : 0x7BEF;
++    spi->drawLine(p.x - nx * mark / 2, p.y - ny * mark / 2,
++                  p.x + nx * mark / 2, p.y + ny * mark / 2, color);
++  }
++
++  const Point start = pointAt(0);
++  spi->fillCircle(start.x, start.y, 7, TFT_WHITE);
++  Point previous = start;
++  for (int i = 1; i <= 100; ++i) {
++    const Point current = pointAt(fraction * perimeter * i / 100.0f);
++    spi->drawLine(previous.x, previous.y, current.x, current.y, TFT_WHITE);
++    previous = current;
++  }
++
++  const Point handle = pointAt(fraction * perimeter);
++  if (fraction > 0.0f) {
++    spi->fillCircle(handle.x, handle.y, 7, TFT_WHITE);
++    spi->drawCircle(handle.x, handle.y, 7, TFT_WHITE);
++  }
++
++  char timeText[8];
++  snprintf(timeText, sizeof(timeText), "%02lu:%02lu", seconds / 60, seconds % 60);
++  spi->setFont(&fonts::Font4);
++  spi->setTextDatum(middle_center);
++  spi->setTextColor(TFT_WHITE, TFT_BLACK);
++  spi->drawString(timeText, left + width / 2, top + height / 2);
+ }
+ 
+ 
+@@ -79,25 +267,17 @@ void PomodoroMod::btnA_pressed(void)
+ {
+   sw_tone();
+   if(status == READY){
+-    xTimer = xTimerCreate("Timer", POMODORO_TIMER_25MIN, pdFALSE, 0, pomodoroTimerCallback);
+-    if(xTimer != NULL){
+-      xTimerStart(xTimer, 0);
+-      status = TIMER25;
+-      avatar.setSpeechFont(&fonts::efontJA_16);
+-    }
+-    else{
+-      avatar.setExpression(Expression::Sad);
+-      avatar.setSpeechText("タイマー設定失敗");
+-      delay(2000);
+-      avatar.setSpeechText("");
+-      avatar.setExpression(Expression::Neutral);
++    if (selectedDurationMs > 0) {
++      startTimer(pdMS_TO_TICKS(selectedDurationMs), TIMER25);
+     }
++  } else if (isPaused) {
++    startTimer(pausedRemaining, status);
++  } else if((status == TIMER25) || (status == TIMER5)){
++    pausedRemaining = xTimerGetExpiryTime(xTimer) - xTaskGetTickCount();
++    stopTimer();
++    isPaused = true;
+   }
+-  else if((status == TIMER25) || (status == TIMER5)){
+-    xTimerStop(xTimer, 0);
+-    xTimerDelete(xTimer, 0);
+-    init();
+-  }
++  updateTimerUi();
+ }
+ 
+ 
+@@ -128,6 +308,21 @@ void PomodoroMod::btnC_pressed(void)
+ 
+ void PomodoroMod::display_touched(int16_t x, int16_t y)
+ {
++  if (box_minus.contain(x, y)) {
++    adjustDuration(-1);
++    return;
++  }
++
++  if (box_plus.contain(x, y)) {
++    adjustDuration(1);
++    return;
++  }
++
++  if (box_start.contain(x, y)) {
++    btnA_pressed();
++    return;
++  }
++
+   if (box_stt.contain(x, y))
+   {
+     sw_tone();
+@@ -167,50 +362,37 @@ void PomodoroMod::idle(void)
+       }
+ 
+       xRemainingTime = xTimerGetExpiryTime( xTimer ) - xTaskGetTickCount();
+-      avatarText = phase + "残り" + String(xRemainingTime / 1000 / 60 + 1) + "分";
++      avatarText = phase + " " + String((xRemainingTime + configTICK_RATE_HZ - 1) / configTICK_RATE_HZ) + " sec";
+       avatar.setSpeechText(avatarText.c_str());
+     }
+ 
+   }
+   else{
+-    avatar.setSpeechText("Btn A:スタート/リセット");
++    avatar.setSpeechText("Touch or Button A: Start/Reset");
+   }
+ 
++  updateTimerUi();
++
+ 
+   if (pomodoroTimerCallbacked) {
+     pomodoroTimerCallbacked = false;
+     if(status == TIMER25){
++      if (!isSilentMode) alarm_tone();
+       notification("集中時間終了です", "pomodoro1.mp3");
+-      xTimer = xTimerCreate("Timer", POMODORO_TIMER_5MIN, pdFALSE, 0, pomodoroTimerCallback);
+-      if(xTimer != NULL){
+-        xTimerStart(xTimer, 0);
+-        status = TIMER25;
+-      }
+-      else{
+-        avatar.setExpression(Expression::Sad);
+-        avatar.setSpeechText("タイマー設定失敗");
+-        delay(2000);
+-        avatar.setSpeechText("");
+-        avatar.setExpression(Expression::Neutral);
+-      }
+-      status = TIMER5;
++      stopTimer();
++      status = READY;
++      selectedDurationMs = 0;
++      isPaused = false;
+     }
+     else if(status == TIMER5){
++      if (!isSilentMode) alarm_tone();
+       notification("休憩時間終了です", "pomodoro2.mp3");
+-      xTimer = xTimerCreate("Timer", POMODORO_TIMER_25MIN, pdFALSE, 0, pomodoroTimerCallback);
+-      if(xTimer != NULL){
+-        xTimerStart(xTimer, 0);
+-        status = TIMER25;
+-      }
+-      else{
+-        avatar.setExpression(Expression::Sad);
+-        avatar.setSpeechText("タイマー設定失敗");
+-        delay(2000);
+-        avatar.setSpeechText("");
+-        avatar.setExpression(Expression::Neutral);
+-      }
+-      status = TIMER25;
++      stopTimer();
++      status = READY;
++      selectedDurationMs = 0;
++      isPaused = false;
+     }
++    updateTimerUi();
+   }
+ 
+ }
+@@ -249,4 +431,4 @@ void PomodoroMod::notification(String text, String mp3name)
+ 
+   }
+ 
+-}
+\ No newline at end of file
++}
+diff --git a/firmware/src/mod/AiStackChan/RealtimeAiMod.h b/firmware/src/mod/AiStackChan/RealtimeAiMod.h
+index 7fac0e7..300e771 100644
+--- a/firmware/src/mod/AiStackChan/RealtimeAiMod.h
++++ b/firmware/src/mod/AiStackChan/RealtimeAiMod.h
+@@ -4,9 +4,15 @@
+ #define _REALTIME_AI_MOD_H
+ 
+ #include <Arduino.h>
++#include <M5GFX.h>
+ #include "mod/ModBase.h"
+ #include "llm/RealtimeLLMBase.h"
+ 
++namespace m5avatar {
++class BoundingRect;
++class DrawContext;
++}
++
+ class RealtimeAiMod: public ModBase{
+ private:
+     box_t box_servo;
+@@ -23,7 +29,11 @@ private:
+     String ttsText;
+ 
+     // for alarm (Function Calling)
++    uint32_t alarmDisplaySeconds;
++    uint32_t alarmDisplayTotalSeconds;
+     void alarmEventHandler();
++    static void drawAlarmTimerUi(M5Canvas *spi, m5avatar::BoundingRect rect,
++                                 m5avatar::DrawContext *ctx, void *userData);
+ 
+     // for official CoreS3 head touch sensor
+     unsigned long headTouchHappyUntilMs = 0;
+diff --git a/firmware/src/mod/AiStackChan/RealtimeAiMod.cpp b/firmware/src/mod/AiStackChan/RealtimeAiMod.cpp
+index e3cf309..3c267b3 100644
+--- a/firmware/src/mod/AiStackChan/RealtimeAiMod.cpp
++++ b/firmware/src/mod/AiStackChan/RealtimeAiMod.cpp
+@@ -14,6 +14,7 @@
+ #include "MySchedule.h"
+ #include "share/SDUtil.h"
+ #include "driver/HeadTouchSensor.h"
++#include "share/DigitalTimerUi.h"
+ 
+ using namespace m5avatar;
+ 
+@@ -28,7 +29,9 @@ extern void alarm_tone();
+ 
+ 
+ RealtimeAiMod::RealtimeAiMod(bool _isOffline)
+-  : isOffline{_isOffline}
++  : isOffline{_isOffline},
++    alarmDisplaySeconds{0},
++    alarmDisplayTotalSeconds{0}
+ {
+   box_servo.setupBox(80, 120, 80, 80);
+   box_stt.setupBox(0, 0, M5.Display.width(), 60);
+@@ -167,9 +170,12 @@ void RealtimeAiMod::alarmEventHandler()
+ 
+     /* Query the period of the timer that expires. */
+     xRemainingTime = xTimerGetExpiryTime( xAlarmTimer ) - xTaskGetTickCount();
+-    avatarText = "Alarm countdown: " + String(xRemainingTime / 1000);
++    alarmDisplaySeconds = (xRemainingTime + configTICK_RATE_HZ - 1) / configTICK_RATE_HZ;
++    alarmDisplayTotalSeconds = (xTimerGetPeriod(xAlarmTimer) + configTICK_RATE_HZ - 1)
++                               / configTICK_RATE_HZ;
+     avatar.set_isSubWindowEnable(true);
+-    avatar.updateSubWindowTxt(avatarText, 0, 0, 200, 50);
++    avatar.updateSubWindowCustom(drawAlarmTimerUi, this, 0, 0,
++                                 M5.Display.width(), M5.Display.height());
+   }
+ 
+   if (alarmTimerCallbacked) {
+@@ -185,6 +191,14 @@ void RealtimeAiMod::alarmEventHandler()
+ 
+ }
+ 
++void RealtimeAiMod::drawAlarmTimerUi(M5Canvas *spi, m5avatar::BoundingRect rect,
++                                     m5avatar::DrawContext * /*ctx*/, void *userData)
++{
++  RealtimeAiMod *mod = static_cast<RealtimeAiMod *>(userData);
++  drawDigitalTimerUiCore(spi, rect, mod->alarmDisplaySeconds,
++                         mod->alarmDisplayTotalSeconds);
++}
++
+ void RealtimeAiMod::updateHeadTouchExpression(void)
+ {
+   HeadTouchSensor::Gesture gesture = HeadTouchSensor::update();
+@@ -219,7 +233,9 @@ void RealtimeAiMod::toggleRealtimeRecord(void)
+ {
+   if(pRtLLM->isRealtimeRecording()){
+     pRtLLM->stopRealtimeRecord();
++    avatar.setExpression(Expression::Neutral);
+   }else{
++    avatar.setExpression(Expression::ListeningV2);
+     pRtLLM->startRealtimeRecord();
+   }
+ }
+diff --git a/firmware/src/share/DigitalTimerUi.h b/firmware/src/share/DigitalTimerUi.h
+new file mode 100644
+index 0000000..3a8e69e
+--- /dev/null
++++ b/firmware/src/share/DigitalTimerUi.h
+@@ -0,0 +1,10 @@
++#ifndef DIGITAL_TIMER_UI_H
++#define DIGITAL_TIMER_UI_H
++
++#include <M5GFX.h>
++#include <Avatar.h>
++
++void drawDigitalTimerUiCore(M5Canvas *spi, m5avatar::BoundingRect rect,
++                            uint32_t seconds, uint32_t totalSeconds);
++
++#endif
+diff --git a/firmware/src/share/DigitalTimerUi.cpp b/firmware/src/share/DigitalTimerUi.cpp
+new file mode 100644
+index 0000000..9b68c97
+--- /dev/null
++++ b/firmware/src/share/DigitalTimerUi.cpp
+@@ -0,0 +1,122 @@
++#include "share/DigitalTimerUi.h"
++#include <algorithm>
++#include <cmath>
++
++void drawDigitalTimerUiCore(M5Canvas *spi, m5avatar::BoundingRect rect,
++                             uint32_t seconds, uint32_t totalSeconds)
++{
++  const int32_t left = rect.getLeft();
++  const int32_t top = rect.getTop();
++  const int32_t width = rect.getWidth();
++  const int32_t height = rect.getHeight();
++  const uint8_t digits[] = {
++    static_cast<uint8_t>((seconds / 60) / 10), static_cast<uint8_t>((seconds / 60) % 10),
++    static_cast<uint8_t>((seconds % 60) / 10), static_cast<uint8_t>(seconds % 10)
++  };
++  const char *segments[] = {"abcdef", "bc", "abdeg", "abcdg", "bcfg",
++                            "acdfg", "acdefg", "abc", "abcdefg", "abcdfg"};
++  const int32_t digitW = 34;
++  const int32_t gap = 4;
++  const int32_t colonW = 24;
++  const int32_t displayW = digitW * 4 + gap * 2 + colonW;
++  const int32_t displayLeft = left + (width - displayW) / 2;
++  const int32_t displayTop = top + (height - 68) / 2;
++  const uint16_t white = TFT_WHITE;
++  const uint16_t dim = 0x2125;
++
++  spi->fillRect(left, top, width, height, TFT_BLACK);
++  for (int digitIndex = 0; digitIndex < 4; ++digitIndex) {
++    const int32_t x = displayLeft + digitIndex * digitW
++                    + (digitIndex % 2 == 1 ? gap : 0)
++                    + (digitIndex >= 2 ? colonW + gap : 0);
++    const int32_t y = displayTop;
++    const char *active = segments[digits[digitIndex]];
++    const int32_t sx = x;
++    const int32_t sy = y;
++    const int32_t segW = 24;
++    const int32_t segH = 7;
++    const int32_t sideW = 7;
++    const int32_t sideH = 27;
++    const int32_t segX = sx + 5;
++    auto drawSegment = [&](char name, int32_t px, int32_t py, int32_t sw, int32_t sh) {
++      spi->fillRoundRect(px, py, sw, sh, 2,
++                         strchr(active, name) != NULL ? white : dim);
++    };
++    drawSegment('a', segX, sy, segW, segH);
++    drawSegment('g', segX, sy + 30, segW, segH);
++    drawSegment('d', segX, sy + 61, segW, segH);
++    drawSegment('f', sx, sy + 5, sideW, sideH);
++    drawSegment('b', sx + 27, sy + 5, sideW, sideH);
++    drawSegment('e', sx, sy + 36, sideW, sideH);
++    drawSegment('c', sx + 27, sy + 36, sideW, sideH);
++  }
++
++  const int32_t colonX = displayLeft + digitW * 2 + gap;
++  spi->fillCircle(colonX + colonW / 2, displayTop + 25, 3, white);
++  spi->fillCircle(colonX + colonW / 2, displayTop + 47, 3, white);
++
++  const int32_t stroke = 8;
++  const int32_t inset = stroke / 2;
++  const int32_t pathLeft = left + inset;
++  const int32_t pathTop = top + inset;
++  const int32_t pathRight = left + width - inset;
++  const int32_t pathBottom = top + height - inset;
++  const float horizontal = static_cast<float>(pathRight - pathLeft);
++  const float vertical = static_cast<float>(pathBottom - pathTop);
++  const float topHalf = horizontal / 2.0f;
++  const float perimeter = horizontal * 2.0f + vertical * 2.0f;
++  const float fraction = totalSeconds == 0
++      ? 0.0f
++      : std::min(1.0f, std::max(0.0f,
++          1.0f - static_cast<float>(seconds) / totalSeconds));
++
++  auto drawTop = [&](int32_t x, int32_t length, uint16_t color) {
++    if (length > 0) spi->fillRect(x - 1, pathTop - stroke / 2,
++                                  length + 2, stroke, color);
++  };
++  auto drawBottom = [&](int32_t x, int32_t length, uint16_t color) {
++    if (length > 0) spi->fillRect(x - 1, pathBottom - stroke / 2,
++                                  length + 2, stroke, color);
++  };
++  auto drawRight = [&](int32_t y, int32_t length, uint16_t color) {
++    if (length > 0) spi->fillRect(pathRight - stroke / 2, y - 1,
++                                  stroke, length + 2, color);
++  };
++  auto drawLeft = [&](int32_t y, int32_t length, uint16_t color) {
++    if (length > 0) spi->fillRect(pathLeft - stroke / 2, y - 1,
++                                  stroke, length + 2, color);
++  };
++
++  const uint16_t track = 0x3186;
++  drawTop(pathLeft, static_cast<int32_t>(horizontal), track);
++  drawRight(pathTop, static_cast<int32_t>(vertical), track);
++  drawBottom(pathLeft, static_cast<int32_t>(horizontal), track);
++  drawLeft(pathTop, static_cast<int32_t>(vertical), track);
++
++  float remaining = perimeter * fraction;
++  const int32_t topRightLength = static_cast<int32_t>(topHalf);
++  if (remaining > 0) {
++    const int32_t length = std::min(topRightLength, static_cast<int32_t>(remaining));
++    drawTop(pathLeft + topRightLength, length, white);
++    remaining -= topRightLength;
++  }
++  if (remaining > 0) {
++    const int32_t length = std::min(static_cast<int32_t>(vertical), static_cast<int32_t>(remaining));
++    drawRight(pathTop, length, white);
++    remaining -= vertical;
++  }
++  if (remaining > 0) {
++    const int32_t length = std::min(static_cast<int32_t>(horizontal), static_cast<int32_t>(remaining));
++    drawBottom(pathRight - length, length, white);
++    remaining -= horizontal;
++  }
++  if (remaining > 0) {
++    const int32_t length = std::min(static_cast<int32_t>(vertical), static_cast<int32_t>(remaining));
++    drawLeft(pathBottom - length, length, white);
++    remaining -= vertical;
++  }
++  if (remaining > 0) {
++    const int32_t length = std::min(static_cast<int32_t>(topHalf), static_cast<int32_t>(remaining));
++    drawTop(pathLeft, length, white);
++  }
++}
+
