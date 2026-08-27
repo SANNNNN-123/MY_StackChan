@@ -100,13 +100,62 @@ function detachPinkPins(source) {
   return pins;
 }
 
+/** Cut front of M5 shell (_1_1) to CoreS3 Group D size: 54×54×15.5 mm. */
+function detachGroupDSlice(source) {
+  if (!source?.isMesh || !source.geometry.index) return null;
+
+  const box = new THREE.Box3().setFromObject(source);
+  const depth = 15.5;
+  const zCut = box.max.z - depth;
+  const geometry = source.geometry;
+  const position = geometry.attributes.position;
+  const index = geometry.index;
+  const v0 = new THREE.Vector3();
+  const v1 = new THREE.Vector3();
+  const v2 = new THREE.Vector3();
+  const center = new THREE.Vector3();
+  const sliceIndices = [];
+  const keepIndices = [];
+
+  for (let i = 0; i < index.count; i += 3) {
+    const a = index.getX(i);
+    const b = index.getX(i + 1);
+    const c = index.getX(i + 2);
+    v0.fromBufferAttribute(position, a).applyMatrix4(source.matrixWorld);
+    v1.fromBufferAttribute(position, b).applyMatrix4(source.matrixWorld);
+    v2.fromBufferAttribute(position, c).applyMatrix4(source.matrixWorld);
+    center.copy(v0).add(v1).add(v2).multiplyScalar(1 / 3);
+    ;(center.z >= zCut ? sliceIndices : keepIndices).push(a, b, c);
+  }
+
+  if (!sliceIndices.length || !keepIndices.length) return null;
+
+  const sliceGeometry = geometry.clone();
+  sliceGeometry.setIndex(sliceIndices);
+  sliceGeometry.computeVertexNormals();
+  const slice = new THREE.Mesh(sliceGeometry, source.material);
+  slice.name = '_00_stackchan450_1_1_groupD';
+  slice.position.copy(source.position);
+  slice.quaternion.copy(source.quaternion);
+  slice.scale.copy(source.scale);
+  source.parent.add(slice);
+
+  geometry.setIndex(keepIndices);
+  geometry.computeVertexNormals();
+  return slice;
+}
+
 function prepareExplodedView() {
   model.updateMatrixWorld(true);
   const pinPart = detachPinkPins(model.getObjectByName('_00_stackchan450_1_3'));
+  const groupD = detachGroupDSlice(model.getObjectByName('_00_stackchan450_1_1'));
 
   const parts = [
-    { name: '_00_stackchan450_1_8', direction: new THREE.Vector3(0, 0, 1), distance: 0.36 },
-    { name: '_00_stackchan450_1_3', direction: new THREE.Vector3(0, 0, 1), distance: 0.20 },
+    // Front stack (+Z): black → grey screen pair → Group D body
+    { name: '_00_stackchan450_1_8', direction: new THREE.Vector3(0, 0, 1), distance: 0.48 },
+    { name: '_00_stackchan450_1_6', direction: new THREE.Vector3(0, 0, 1), distance: 0.40 },
+    { name: '_00_stackchan450_1_3', direction: new THREE.Vector3(0, 0, 1), distance: 0.36 },
+    { part: groupD, direction: new THREE.Vector3(0, 0, 1), distance: 0.18 },
     // Pink side connector + short stubs + long pins — same offset so they stay together
     { name: '_00_stackchan450_1_2', direction: new THREE.Vector3(-1, 0, 0), distance: 0.32 },
     { name: '_00_stackchan450_1_4', direction: new THREE.Vector3(-1, 0, 0), distance: 0.32 },
