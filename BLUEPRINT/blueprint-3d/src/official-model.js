@@ -58,18 +58,67 @@ function resize() {
   camera.updateProjectionMatrix();
 }
 
+function detachPinkPins(source) {
+  if (!source?.isMesh || !source.geometry.index) return null;
+
+  const geometry = source.geometry;
+  const position = geometry.attributes.position;
+  const index = geometry.index;
+  const v0 = new THREE.Vector3();
+  const v1 = new THREE.Vector3();
+  const v2 = new THREE.Vector3();
+  const center = new THREE.Vector3();
+  const pinIndices = [];
+  const keepIndices = [];
+
+  for (let i = 0; i < index.count; i += 3) {
+    const a = index.getX(i);
+    const b = index.getX(i + 1);
+    const c = index.getX(i + 2);
+    v0.fromBufferAttribute(position, a).applyMatrix4(source.matrixWorld);
+    v1.fromBufferAttribute(position, b).applyMatrix4(source.matrixWorld);
+    v2.fromBufferAttribute(position, c).applyMatrix4(source.matrixWorld);
+    center.copy(v0).add(v1).add(v2).multiplyScalar(1 / 3);
+    // Long horizontal pins + left connector teeth live on the pink side (x < -15)
+    ;(center.x < -15 ? pinIndices : keepIndices).push(a, b, c);
+  }
+
+  if (!pinIndices.length || !keepIndices.length) return null;
+
+  const pinGeometry = geometry.clone();
+  pinGeometry.setIndex(pinIndices);
+  pinGeometry.computeVertexNormals();
+  const pins = new THREE.Mesh(pinGeometry, source.material);
+  pins.name = '_00_stackchan450_1_3_pins';
+  pins.position.copy(source.position);
+  pins.quaternion.copy(source.quaternion);
+  pins.scale.copy(source.scale);
+  source.parent.add(pins);
+
+  geometry.setIndex(keepIndices);
+  geometry.computeVertexNormals();
+  return pins;
+}
+
 function prepareExplodedView() {
+  model.updateMatrixWorld(true);
+  const pinPart = detachPinkPins(model.getObjectByName('_00_stackchan450_1_3'));
+
   const parts = [
     { name: '_00_stackchan450_1_8', direction: new THREE.Vector3(0, 0, 1), distance: 0.36 },
     { name: '_00_stackchan450_1_3', direction: new THREE.Vector3(0, 0, 1), distance: 0.20 },
+    // Pink side connector + short stubs + long pins — same offset so they stay together
+    { name: '_00_stackchan450_1_2', direction: new THREE.Vector3(-1, 0, 0), distance: 0.32 },
+    { name: '_00_stackchan450_1_4', direction: new THREE.Vector3(-1, 0, 0), distance: 0.32 },
+    { part: pinPart, direction: new THREE.Vector3(-1, 0, 0), distance: 0.32 },
     { name: '_00_stackchan450_2', direction: new THREE.Vector3(0, -1, 0), distance: 0.24 },
     { name: '_00_stackchan450_2_3', direction: new THREE.Vector3(0, -1, 0), distance: 0.40 },
     { name: '_00_stackchan450_3', direction: new THREE.Vector3(0, -1, 0), distance: 0.72 }
   ];
   const size = new THREE.Box3().setFromObject(model).getSize(new THREE.Vector3()).length();
 
-  parts.forEach(({ name, direction, distance }) => {
-    const part = model.getObjectByName(name);
+  parts.forEach(({ name, part: givenPart, direction, distance }) => {
+    const part = givenPart || model.getObjectByName(name);
     if (!part?.parent) return;
     const worldStart = part.getWorldPosition(new THREE.Vector3());
     const worldEnd = worldStart.clone().addScaledVector(direction, size * distance);
