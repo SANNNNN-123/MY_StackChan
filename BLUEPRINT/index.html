@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0d1110" />
+    <title>StackChan Blueprint</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div class="brand"><span class="brand-mark">＋</span><span>STACKCHAN</span><small>BLUEPRINT ARCHIVE</small></div>
+        <div class="system-status"><span class="status-dot"></span> SYSTEM READY <span class="slash">/</span> DRAWING 01 <button class="theme-toggle" id="themeToggle">THEME / <b id="themeName">DARK</b></button></div>
+      </header>
+
+      <section class="workspace">
+        <aside class="sidebar left-panel">
+          <p class="eyebrow">ARCHIVE / 001</p>
+          <h1>StackChan<br /><em>Model Size</em></h1>
+          <p class="description">Dimensional reference drawing for the StackChan enclosure and base assembly.</p>
+
+          <div class="panel-block">
+            <div class="panel-label">DRAWING VIEWS</div>
+            <nav class="view-list" aria-label="Drawing views">
+              <button class="view-button active" data-view="overview"><span>00</span> OVERVIEW</button>
+              <button class="view-button" data-view="front"><span>01</span> FRONT ELEVATION</button>
+              <button class="view-button" data-view="side"><span>02</span> SIDE ELEVATION</button>
+              <button class="view-button" data-view="top"><span>03</span> TOP PLAN</button>
+              <button class="view-button" data-view="rear"><span>04</span> REAR / I-O</button>
+              <button class="view-button" data-view="bottom"><span>05</span> BASE DETAIL</button>
+            </nav>
+          </div>
+
+          <div class="panel-block measurements">
+            <div class="panel-label">PRIMARY DIMENSIONS</div>
+            <div class="measure"><span>WIDTH</span><strong>48 <i>mm</i></strong></div>
+            <div class="measure"><span>DEPTH</span><strong>61.5 <i>mm</i></strong></div>
+            <div class="measure"><span>HEIGHT</span><strong>70.5 <i>mm</i></strong></div>
+          </div>
+        </aside>
+
+        <section class="drawing-area">
+          <div class="drawing-toolbar">
+            <span class="toolbar-title"><span class="live-line"></span> TECHNICAL DRAWING / <b id="viewTitle">OVERVIEW</b></span>
+            <div class="toolbar-actions"><button id="zoomOut" aria-label="Zoom out">−</button><span id="zoomValue">100%</span><button id="zoomIn" aria-label="Zoom in">＋</button><button id="resetView">RESET</button></div>
+          </div>
+          <div class="canvas-wrap" id="canvasWrap">
+            <canvas id="blueprintCanvas" aria-label="Interactive StackChan technical drawing"></canvas>
+            <div class="crosshair crosshair-a"></div><div class="crosshair crosshair-b"></div>
+            <div class="canvas-help">DRAG TO PAN <span>/</span> SCROLL TO ZOOM</div>
+          </div>
+          <div class="drawing-footer"><span>FILE / MODEL_SIZE.PNG</span><span>UNIT / MILLIMETRE</span><span>REV / 01.0</span></div>
+        </section>
+
+        <aside class="sidebar right-panel">
+          <div class="panel-block"><div class="panel-label">INSPECTION</div><p class="inspection-title" id="inspectionTitle">Full drawing sheet</p><p class="inspection-copy" id="inspectionCopy">Select a view or click a marked area to inspect the StackChan enclosure.</p></div>
+          <div class="panel-block"><div class="panel-label">CALLOUTS</div><button class="callout" data-callout="screen"><span>01</span><b>DISPLAY MODULE</b><small>FRONT FACE / ACTIVE SURFACE</small></button><button class="callout" data-callout="base"><span>02</span><b>ROTATION BASE</b><small>LOWER ASSEMBLY / MOUNT</small></button><button class="callout" data-callout="io"><span>03</span><b>REAR I/O PANEL</b><small>CONNECTORS / POWER</small></button></div>
+          <div class="panel-block source-block"><div class="panel-label">SOURCE RECORD</div><div class="source-row"><span>ASSET</span><b>Model_Size.png</b></div><div class="source-row"><span>RESOLUTION</span><b>8268 × 5847</b></div><div class="source-row"><span>STATUS</span><b class="accent">REFERENCE</b></div></div>
+          <button class="download-button" id="downloadButton">DOWNLOAD DRAWING <span>↗</span></button>
+        </aside>
+      </section>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>
