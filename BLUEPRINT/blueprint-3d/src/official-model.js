@@ -63,7 +63,8 @@ function prepareExplodedView() {
     { name: '_00_stackchan450_1_8', direction: new THREE.Vector3(0, 0, 1), distance: 0.36 },
     { name: '_00_stackchan450_1_3', direction: new THREE.Vector3(0, 0, 1), distance: 0.20 },
     { name: '_00_stackchan450_2', direction: new THREE.Vector3(0, -1, 0), distance: 0.24 },
-    { name: '_00_stackchan450_3', direction: new THREE.Vector3(0, -1, 0), distance: 0.38 }
+    { name: '_00_stackchan450_2_3', direction: new THREE.Vector3(0, -1, 0), distance: 0.40 },
+    { name: '_00_stackchan450_3', direction: new THREE.Vector3(0, -1, 0), distance: 0.72 }
   ];
   const size = new THREE.Box3().setFromObject(model).getSize(new THREE.Vector3()).length();
 
