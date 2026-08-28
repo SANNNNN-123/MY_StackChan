@@ -66,10 +66,15 @@ root.innerHTML = `
       </div>
       <div class="rule"></div>
       <label>VIEW CONTROL</label>
-      <div class="control"><span>DISPLAY MODE</span><button class="action" id="wireframe">WIREFRAME / OFF</button></div>
-      <button class="action" id="explode">EXPLODED VIEW / OFF</button>
-      <button class="action secondary" id="reset">RESET CAMERA / DEFAULT</button>
-      <a class="source" href="https://github.com/m5stack/M5_Hardware/tree/master/Products/K151_StackChan/Structures" target="_blank" rel="noreferrer">SOURCE / GITHUB</a>
+      <div class="view-controls">
+        <label class="control-row" for="wireframe"><span>WIREFRAME</span><input type="checkbox" id="wireframe" /></label>
+        <label class="control-row" for="explode"><span>EXPLODED VIEW</span><input type="checkbox" id="explode" /></label>
+        <button class="control-row" type="button" id="reset">RESET CAMERA</button>
+        <a class="control-row github-link" href="https://github.com/m5stack/M5_Hardware/tree/master/Products/K151_StackChan/Structures" target="_blank" rel="noreferrer">
+          <svg class="github-icon" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+          GITHUB
+        </a>
+      </div>
     </aside>
   </main>`;
 
@@ -345,7 +350,7 @@ function applyExplodedState(on, { immediate = false } = {}) {
       part.position.copy(position).addScaledVector(offset, explosionProgress)
     );
   }
-  document.querySelector('#explode').textContent = `EXPLODED VIEW / ${exploded ? 'ON' : 'OFF'}`;
+  document.querySelector('#explode').checked = exploded;
   document.querySelector('#assemblyMode').textContent = exploded
     ? 'M5STACK APP ASSET / EXPLODED VIEW'
     : 'M5STACK APP ASSET / FULL ASSEMBLY';
@@ -356,10 +361,29 @@ function applyDefaultView() {
   setCameraView('ISO');
 }
 
-function toggleExplodedView() {
-  if (!explodedParts.length) return;
-  applyExplodedState(!exploded);
-}
+document.querySelector('#wireframe').onchange = event => {
+  if (!model) {
+    event.currentTarget.checked = false;
+    return;
+  }
+  const enabled = event.currentTarget.checked;
+  model.traverse(child => {
+    if (!child.isMesh) return;
+    for (const material of Array.isArray(child.material) ? child.material : [child.material]) {
+      material.wireframe = enabled;
+    }
+  });
+};
+
+document.querySelector('#explode').onchange = event => {
+  if (!explodedParts.length) {
+    event.currentTarget.checked = exploded;
+    return;
+  }
+  applyExplodedState(event.currentTarget.checked);
+};
+
+document.querySelector('#reset').onclick = () => applyDefaultView();
 
 function updateExplodedView() {
   explosionProgress = THREE.MathUtils.damp(explosionProgress, exploded ? 1 : 0, 5.5, 1 / 60);
@@ -413,22 +437,6 @@ new GLTFLoader().load('/models/stackchan/stack_chan_model.glb', gltf => {
 document.querySelectorAll('#cameraViews .view').forEach(button =>
   button.onclick = () => setCameraView(button.dataset.view)
 );
-
-document.querySelector('#wireframe').onclick = event => {
-  if (!model) return;
-  const enabled = event.currentTarget.dataset.enabled !== 'true';
-  model.traverse(child => {
-    if (!child.isMesh) return;
-    for (const material of Array.isArray(child.material) ? child.material : [child.material]) {
-      material.wireframe = enabled;
-    }
-  });
-  event.currentTarget.dataset.enabled = enabled;
-  event.currentTarget.textContent = `WIREFRAME / ${enabled ? 'ON' : 'OFF'}`;
-};
-
-document.querySelector('#explode').onclick = toggleExplodedView;
-document.querySelector('#reset').onclick = () => applyDefaultView();
 
 document.querySelector('#theme').onclick = () => {
   const blue = document.body.dataset.theme === 'blue';

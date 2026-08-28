@@ -359,7 +359,58 @@ canvas { position: absolute; inset: 0; }
   margin-bottom: clamp(6px, 1vh, 12px);
 }
 
-input { accent-color: var(--accent); width: 100%; }
+input[type='range'] { accent-color: var(--accent); width: 100%; }
+
+.view-controls {
+  display: grid;
+  gap: 3px;
+  margin-top: var(--gap-sm);
+}
+
+.control-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: clamp(8px, 1.2vh, 12px) 10px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  font: 9px 'DM Mono', monospace;
+  letter-spacing: .09em;
+  color: var(--text);
+  text-decoration: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+.control-row:hover { border-color: var(--accent); }
+
+button.control-row {
+  font: 9px 'DM Mono', monospace;
+  letter-spacing: .09em;
+  color: var(--text);
+  justify-content: flex-start;
+}
+
+.control-row input[type='checkbox'] {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.control-row.github-link {
+  justify-content: flex-start;
+  gap: 8px;
+}
+
+.github-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
 
 .action, .source {
   display: block;
