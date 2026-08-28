@@ -1,63 +1,429 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import './style.css';
 
 const root = document.querySelector('#app');
 document.body.dataset.theme = 'blue';
+
+const cameraViewButtons = ['ISO', 'FRONT', 'SIDE', 'REAR', 'TOP', 'BOTTOM', 'BLUEPRINT'];
+
 root.innerHTML = `
-  <header class="topbar"><div class="brand"><span>＋</span> STACKCHAN <small>3D BLUEPRINT ARCHIVE</small></div><div class="status"><i></i> SYSTEM READY <b>/</b> <button id="theme">THEME / BLUEPRINT</button></div></header>
+  <header class="topbar">
+    <div class="brand"><span>＋</span> STACKCHAN <small>3D BLUEPRINT ARCHIVE</small></div>
+    <div class="status"><i></i> SYSTEM READY <b>/</b> <button id="theme">THEME / BLUEPRINT</button></div>
+  </header>
   <main class="layout">
-    <aside class="left panel"><div class="eyebrow">ARCHIVE / 002</div><h1>StackChan<br><em>Assembly</em></h1><p>Interactive 3D reconstruction using the official M5Stack structure files.</p>
-      <div class="rule"></div><label>CAMERA VIEWS</label><div class="view-grid">${['ISO','FRONT','SIDE','REAR','TOP','BOTTOM','BLUEPRINT'].map((x,i)=>`<button class="view ${i===0?'active':''}" data-view="${x}">${String(i).padStart(2,'0')} / ${x}</button>`).join('')}</div>
-      <div class="rule"></div><label>MODEL PARTS</label><div id="parts" class="parts"></div>
+    <aside class="left panel">
+      <div class="eyebrow">ARCHIVE / 002</div>
+      <h1>StackChan<br><em>Official Model</em></h1>
+      <p>Complete rendered model published with M5Stack's official StackChan application.</p>
+      <div class="rule"></div>
+      <label>CAMERA VIEWS</label>
+      <div class="view-grid" id="cameraViews">${cameraViewButtons.map((view, index) =>
+        `<button class="view ${view === 'ISO' ? 'active' : ''}" data-view="${view}">${String(index).padStart(2, '0')} / ${view}</button>`
+      ).join('')}</div>
+      <div class="rule"></div>
+      <label>MODEL PARTS</label>
+      <div id="parts" class="parts"></div>
     </aside>
-    <section class="stage"><div class="stage-head"><span><i></i> TECHNICAL VIEW / <b id="viewName">ISOMETRIC</b></span><span id="loadStatus">LOADING STRUCTURE / 00%</span></div><div id="viewport"><img id="blueprintImage" src="/Model_Size.png" alt="StackChan dimensional blueprint" /><div class="loading"><strong id="loadingText">LOADING STRUCTURE / 00%</strong><span><i id="progress"></i></span></div><div class="hint">DRAG TO ORBIT <b>/</b> SCROLL TO ZOOM</div></div><div class="stage-foot"><span>UNIT / MILLIMETRE</span><span>ORBIT CONTROLS / ACTIVE</span><span>REV / 01.0</span></div></section>
-    <aside class="right panel"><div class="rule first"></div><label>ACTIVE ASSEMBLY</label><h2>STACKCHAN BODY</h2><p class="muted">M5STACK / K151</p><div class="stats"><span>WIDTH<strong>54.0 mm</strong></span><span>HEIGHT<strong>70.5 mm</strong></span><span>DEPTH<strong>61.5 mm</strong></span></div><div class="rule"></div><label>INSPECTION</label><div class="readout"><span>PARTS LOADED<strong id="partCount">0 / 10</strong></span><span>EXPLODE<strong id="explodeValue">0%</strong></span><span>MODEL SOURCE<strong>OFFICIAL STL</strong></span></div><div class="rule"></div><label>ASSEMBLY CONTROL</label><div class="control"><span>EXPLODE VIEW</span><input id="explode" type="range" min="0" max="100" value="0" /></div><button class="action" id="reset">RESET CAMERA / DEFAULT</button><a class="source" href="/official-model/">VIEW / OFFICIAL MODEL</a><a class="source" href="https://github.com/m5stack/M5_Hardware/tree/master/Products/K151_StackChan/Structures" target="_blank" rel="noreferrer">SOURCE / GITHUB</a></aside>
+    <section class="stage">
+      <div class="stage-head">
+        <span><i></i> TECHNICAL VIEW / <b id="viewName">ISOMETRIC</b></span>
+        <span id="loadStatus">LOADING OFFICIAL MODEL</span>
+      </div>
+      <div id="viewport">
+        <img id="blueprintImage" src="/Model_Size.png" alt="StackChan dimensional blueprint" />
+        <div class="loading">
+          <strong id="loadingText">LOADING STACK_CHAN_MODEL.GLB</strong>
+          <span><i id="progress"></i></span>
+        </div>
+        <div class="hint">DRAG TO ORBIT <b>/</b> SCROLL TO ZOOM</div>
+      </div>
+      <div class="stage-foot">
+        <span>ORIGINAL MATERIALS</span>
+        <span>ORBIT CONTROLS / ACTIVE</span>
+        <span>REV / OFFICIAL</span>
+      </div>
+    </section>
+    <aside class="right panel">
+      <div class="rule first"></div>
+      <label>ACTIVE ASSEMBLY</label>
+      <h2>STACKCHAN</h2>
+      <p class="muted" id="assemblyMode">M5STACK APP ASSET / FULL ASSEMBLY</p>
+      <div class="stats">
+        <span>WIDTH<strong>54.0 mm</strong></span>
+        <span>HEIGHT<strong>70.5 mm</strong></span>
+        <span>DEPTH<strong>61.5 mm</strong></span>
+      </div>
+      <div class="rule"></div>
+      <label>INSPECTION</label>
+      <div class="readout">
+        <span>MESHES<strong id="meshCount">—</strong></span>
+        <span>TRIANGLES<strong id="triangleCount">—</strong></span>
+        <span>MODEL SOURCE<strong>OFFICIAL GLB</strong></span>
+        <span>STATUS<strong id="modelStatus">LOADING</strong></span>
+      </div>
+      <div class="rule"></div>
+      <label>VIEW CONTROL</label>
+      <div class="control"><span>DISPLAY MODE</span><button class="action" id="wireframe">WIREFRAME / OFF</button></div>
+      <button class="action" id="explode">EXPLODED VIEW / OFF</button>
+      <button class="action secondary" id="reset">RESET CAMERA / DEFAULT</button>
+      <a class="source" href="https://github.com/m5stack/M5_Hardware/tree/master/Products/K151_StackChan/Structures" target="_blank" rel="noreferrer">SOURCE / GITHUB</a>
+    </aside>
   </main>`;
 
-const files = [
-  ['Main body','StackChan-MainBody.stl','#e9f0eb'], ['Base','StackChan-Base.stl','#d3ded7'], ['Base cover','StackChan-BaseCover.stl','#b8c9bf'], ['Bearing fixture','StackChan-BearingFixture.stl','#9fafaa'], ['Servo arm','StackChan-ServoArm.stl','#e36d42'], ['Servo body','StackChan-ServoBody.stl','#75847d'], ['Servo cover','StackChan-ServoCover.stl','#c7d3cb'], ['Side cover','StackChan-ServoSideCover.stl','#aabbb0'], ['Light guide A','StackChan-LightGuideBar-A.stl','#dce9e1'], ['Light guide B','StackChan-LightGuideBar-B.stl','#dce9e1']
+const partCatalog = [
+  { label: 'Screen bezel', name: '_00_stackchan450_1_8' },
+  { label: 'Screen panel', name: '_00_stackchan450_1_6' },
+  { label: 'CoreS3 module', name: '_00_stackchan450_1_3' },
+  { label: 'M5 shell body', name: '_00_stackchan450_1_1' },
+  { label: 'M5 shell front', name: '_00_stackchan450_1_1_groupD' },
+  { label: 'Pink connector', name: '_00_stackchan450_1_2' },
+  { label: 'Side stub', name: '_00_stackchan450_1_4' },
+  { label: 'Connector pins', name: '_00_stackchan450_1_3_pins' },
+  { label: 'Main body', name: '_00_stackchan450_2' },
+  { label: 'Servo section', name: '_00_stackchan450_2_3' },
+  { label: 'Base', name: '_00_stackchan450_3' },
 ];
-const base = '/models/stackchan/';
-// The published STL files use different export origins. These positions create
-// a shared assembly coordinate system in millimetres after each mesh is centred.
-const assemblyPositions = [
-  [0, 43, 0],    // main body
-  [0, 7, 0],     // base
-  [0, 13, 0],    // base cover
-  [0, 25, 0],    // bearing fixture
-  [0, 30, 0],    // servo arm
-  [0, 30, 0],    // servo body
-  [0, 30, 0],    // servo cover
-  [0, 30, 0],    // side cover
-  [-19, 48, 0],  // light guide A
-  [19, 48, 0]    // light guide B
-];
-const viewport = document.querySelector('#viewport'), scene = new THREE.Scene(), blueprintImage = document.querySelector('#blueprintImage');
-const camera = new THREE.PerspectiveCamera(32, 1, .1, 1000); camera.position.set(-105,75,105);
-const renderer = new THREE.WebGLRenderer({antialias:true,alpha:true}); renderer.setPixelRatio(Math.min(devicePixelRatio,2)); renderer.outputColorSpace=THREE.SRGBColorSpace; viewport.append(renderer.domElement);
-const controls = new OrbitControls(camera,renderer.domElement); controls.enableDamping=true; controls.dampingFactor=.07; controls.target.set(0,35,0);
-scene.add(new THREE.HemisphereLight(0xbdd7cf,0x111714,2.1)); const key=new THREE.DirectionalLight(0xffffff,3);key.position.set(80,120,100);scene.add(key);
-const model=new THREE.Group(); scene.add(model); const loader=new STLLoader(); const meshes=[]; let loaded=0;
-const partsEl=document.querySelector('#parts');
-files.forEach(([label,file,color],index)=>{const row=document.createElement('button');row.className='part-row';row.innerHTML=`<span class="part-index">${String(index+1).padStart(2,'0')}</span><b>${label}</b><i>VISIBLE</i>`;partsEl.append(row);loader.load(base+file,geometry=>{geometry.computeVertexNormals();geometry.center();const material=new THREE.MeshStandardMaterial({color,metalness:.18,roughness:.64});const mesh=new THREE.Mesh(geometry,material);mesh.name=label;mesh.rotation.x=-Math.PI/2;mesh.userData={assembly:new THREE.Vector3(...assemblyPositions[index]),explode:new THREE.Vector3((index%3-1)*5,Math.floor(index/3)*4,(index%2?1:-1)*4)};mesh.position.copy(mesh.userData.assembly);model.add(mesh);meshes[index]=mesh;row.onclick=()=>{mesh.visible=!mesh.visible;row.classList.toggle('off',!mesh.visible);row.querySelector('i').textContent=mesh.visible?'VISIBLE':'HIDDEN'};loaded++;const pct=Math.round(loaded/files.length*100);document.querySelector('#progress').style.width=pct+'%';document.querySelector('#loadingText').textContent=`LOADING STRUCTURE / ${String(pct).padStart(2,'0')}%`;document.querySelector('#loadStatus').textContent=pct===100?'STRUCTURE READY / 10 PARTS':`LOADING STRUCTURE / ${String(pct).padStart(2,'0')}%`;document.querySelector('#partCount').textContent=`${loaded} / ${files.length}`;if(loaded===files.length){document.querySelector('.loading').classList.add('done');fitModel();}},undefined,()=>{row.classList.add('off');row.querySelector('i').textContent='UNAVAILABLE';loaded++;});});
-const coreRow=document.createElement('button');coreRow.className='part-row';coreRow.innerHTML='<span class="part-index">11</span><b>CoreS3 display</b><i>VISIBLE</i>';partsEl.append(coreRow);
-const coreDisplay=new THREE.Group();coreDisplay.name='CoreS3 display module';coreDisplay.userData={assembly:new THREE.Vector3(0,43,24.2),explode:new THREE.Vector3(0,9,10)};
-const bezel=new THREE.Mesh(new THREE.BoxGeometry(46,35,1.4),new THREE.MeshStandardMaterial({color:'#17201c',metalness:.3,roughness:.35}));
-const screen=new THREE.Mesh(new THREE.BoxGeometry(42.4,31.8,0.8),new THREE.MeshStandardMaterial({color:'#07100d',metalness:.1,roughness:.2,emissive:'#061b16',emissiveIntensity:.45}));screen.position.z=.9;
-const lens=new THREE.Mesh(new THREE.CylinderGeometry(2.8,2.8,.9,32),new THREE.MeshStandardMaterial({color:'#172a25',metalness:.4,roughness:.2}));lens.rotation.x=Math.PI/2;lens.position.set(0,-19,.9);
-coreDisplay.add(bezel,screen,lens);coreDisplay.position.copy(coreDisplay.userData.assembly);model.add(coreDisplay);coreDisplay.visible=true;
-coreRow.innerHTML='<span class="part-index">11</span><b>CoreS3 source (exploded)</b><i>LOADING</i>';
-const displayRow=document.createElement('button');displayRow.className='part-row';displayRow.innerHTML='<span class="part-index">12</span><b>CoreS3 display</b><i>VISIBLE</i>';partsEl.append(displayRow);displayRow.onclick=()=>{coreDisplay.visible=!coreDisplay.visible;displayRow.classList.toggle('off',!coreDisplay.visible);displayRow.querySelector('i').textContent=coreDisplay.visible?'VISIBLE':'HIDDEN'};
-const coreSource=new THREE.Group();coreSource.name='CoreS3 complete source structure';coreSource.userData={assembly:new THREE.Vector3(0,43,0),explode:new THREE.Vector3(0,9,0)};coreSource.visible=false;model.add(coreSource);
-function assembleCoreS3(source){const input=source.attributes.position.array,bins=[[],[],[],[]],bounds=[[-Infinity,55],[55,115],[115,195],[195,Infinity]];for(let i=0;i<input.length;i+=9){const cx=(input[i]+input[i+3]+input[i+6])/3;const b=bounds.findIndex(([min,max])=>cx>=min&&cx<max);if(b>=0)bins[b].push(...input.slice(i,i+9));}const group=new THREE.Group();const colors=['#93aaa0','#718078','#a9b9b0','#c2d0c8'];bins.slice(2).forEach((vertices,i)=>{if(!vertices.length)return;let min=Infinity,max=-Infinity;for(let n=0;n<vertices.length;n+=3){min=Math.min(min,vertices[n]);max=Math.max(max,vertices[n]);}const center=(min+max)/2;const array=new Float32Array(vertices);for(let n=0;n<array.length;n+=3)array[n]-=center;const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.BufferAttribute(array,3));g.computeVertexNormals();group.add(new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:colors[i+2],metalness:.12,roughness:.7,transparent:true,opacity:.86})));});return group;}
-loader.load('/models/stackchan/CoreS3.stl',geometry=>{const assembled=assembleCoreS3(geometry);assembled.rotation.x=-Math.PI/2;coreSource.add(assembled);coreSource.position.copy(coreSource.userData.assembly);coreRow.querySelector('i').textContent='HIDDEN';coreRow.classList.add('off');coreRow.onclick=()=>{coreSource.visible=!coreSource.visible;coreRow.classList.toggle('off',!coreSource.visible);coreRow.querySelector('i').textContent=coreSource.visible?'VISIBLE':'HIDDEN'};fitModel();},undefined,()=>{coreRow.querySelector('i').textContent='UNAVAILABLE';});
-function fitModel(){const box=new THREE.Box3().setFromObject(model),size=box.getSize(new THREE.Vector3()),center=box.getCenter(new THREE.Vector3());controls.target.copy(center);camera.position.copy(center).add(new THREE.Vector3(size.x*1.8,size.y*1.3,size.z*1.8));camera.near=Math.max(.1,size.length()/100);camera.far=size.length()*20;camera.updateProjectionMatrix();controls.update();}
-function resize(){const r=viewport.getBoundingClientRect();renderer.setSize(r.width,r.height,false);camera.aspect=r.width/r.height;camera.updateProjectionMatrix()}window.addEventListener('resize',resize);resize();
-const positions={ISO:[-1, .8, 1],FRONT:[0,.25,1],SIDE:[-1,.25,0],REAR:[0,.25,-1],TOP:[0,1,0],BOTTOM:[0,-1,0]};
-document.querySelectorAll('.view').forEach(button=>button.onclick=()=>{document.querySelectorAll('.view').forEach(x=>x.classList.remove('active'));button.classList.add('active');const name=button.dataset.view;if(name==='BLUEPRINT'){viewport.classList.add('blueprint-mode');document.querySelector('#viewName').textContent='MODEL SIZE / 2D';document.querySelector('#loadStatus').textContent='REFERENCE DRAWING / PNG';return}viewport.classList.remove('blueprint-mode');document.querySelector('#viewName').textContent=name==='ISO'?'ISOMETRIC':name+' ELEVATION';const p=positions[name],box=new THREE.Box3().setFromObject(model),c=box.getCenter(new THREE.Vector3()),s=Math.max(...box.getSize(new THREE.Vector3()).toArray())*2.2;camera.position.set(c.x+p[0]*s,c.y+p[1]*s,c.z+p[2]*s);controls.target.copy(c);controls.update()});
-document.querySelector('#explode').oninput=e=>{const n=e.target.value/100;document.querySelector('#explodeValue').textContent=e.target.value+'%';[...meshes,coreDisplay,coreSource].forEach(m=>{if(m)m.position.copy(m.userData.assembly).addScaledVector(m.userData.explode,n)})};document.querySelector('#reset').onclick=()=>{document.querySelector('#explode').value=0;document.querySelector('#explodeValue').textContent='0%';[...meshes,coreDisplay,coreSource].forEach(m=>{if(m)m.position.copy(m.userData.assembly)});fitModel()};
-document.querySelector('#theme').onclick=()=>{const blue=document.body.dataset.theme==='blue';document.body.dataset.theme=blue?'dark':'blue';document.querySelector('#theme').textContent=`THEME / ${blue?'DARK':'BLUEPRINT'}`};
-function animate(){requestAnimationFrame(animate);controls.update();renderer.render(scene,camera)}animate();
-document.querySelectorAll('.view').forEach(button=>button.addEventListener('click',()=>{renderer.domElement.style.display=button.dataset.view==='BLUEPRINT'?'none':'block';}));
+
+const viewport = document.querySelector('#viewport');
+const partsEl = document.querySelector('#parts');
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(32, 1, 0.001, 1000);
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+viewport.append(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.07;
+
+scene.add(new THREE.HemisphereLight(0xbdd7cf, 0x111714, 2.1));
+const key = new THREE.DirectionalLight(0xffffff, 3);
+key.position.set(180, 220, 160);
+scene.add(key);
+
+let model;
+let exploded = false;
+let explosionProgress = 0;
+const explodedParts = [];
+const partRows = new Map();
+
+const cameraViews = {
+  ISO: [1, 0.7, 1],
+  FRONT: [0, 0.06, 1],
+  SIDE: [-1, 0.06, 0],
+  REAR: [0, 0.06, -1],
+  TOP: [0, 1, 0],
+  BOTTOM: [0, -1, 0],
+};
+
+let activeView = 'ISO';
+const fitSphere = new THREE.Sphere();
+
+function fitDistance(box, name) {
+  const rect = viewport.getBoundingClientRect();
+  const aspect = Math.max(0.35, rect.width / Math.max(rect.height, 1));
+
+  box.getBoundingSphere(fitSphere);
+  const radius = fitSphere.radius;
+
+  const vFov = THREE.MathUtils.degToRad(camera.fov);
+  const hFov = 2 * Math.atan(Math.tan(vFov / 2) * aspect);
+
+  // sin() keeps the full sphere inside the frustum; tan() was pulling the camera too close.
+  const distV = radius / Math.sin(vFov / 2);
+  const distH = radius / Math.sin(hFov / 2);
+
+  const basePadding = name === 'ISO' ? 1.45 : 1.3;
+
+  // Short laptop viewports need extra pull-back so the model is not clipped.
+  const heightFactor = THREE.MathUtils.clamp(950 / Math.max(rect.height, 380), 1, 1.45);
+
+  // The 3-column layout often leaves a narrow central stage on smaller screens.
+  const aspectFactor = aspect < 1.35 ? 1 + (1.35 - aspect) * 0.3 : 1;
+
+  return Math.max(distV, distH) * basePadding * heightFactor * aspectFactor;
+}
+
+function setCameraView(name = 'ISO') {
+  activeView = name;
+
+  if (name === 'BLUEPRINT') {
+    viewport.classList.add('blueprint-mode');
+    renderer.domElement.style.display = 'none';
+    document.querySelector('#viewName').textContent = 'MODEL SIZE / 2D';
+    document.querySelector('#loadStatus').textContent = 'REFERENCE DRAWING / PNG';
+    document.querySelectorAll('#cameraViews .view').forEach(button =>
+      button.classList.toggle('active', button.dataset.view === name)
+    );
+    return;
+  }
+
+  viewport.classList.remove('blueprint-mode');
+  renderer.domElement.style.display = 'block';
+  if (!model) return;
+
+  const box = new THREE.Box3().setFromObject(model);
+  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  const distance = fitDistance(box, name);
+  const direction = new THREE.Vector3(...cameraViews[name]).normalize();
+
+  controls.target.copy(center);
+  camera.position.copy(center).addScaledVector(direction, distance);
+  camera.near = Math.max(0.001, size.length() / 100);
+  camera.far = size.length() * 20;
+  camera.updateProjectionMatrix();
+  controls.update();
+
+  document.querySelector('#viewName').textContent = name === 'ISO' ? 'ISOMETRIC' : `${name} ELEVATION`;
+  document.querySelector('#loadStatus').textContent = 'OFFICIAL MODEL READY / GLB';
+  document.querySelectorAll('#cameraViews .view').forEach(button =>
+    button.classList.toggle('active', button.dataset.view === name)
+  );
+}
+
+function resize() {
+  const rect = viewport.getBoundingClientRect();
+  renderer.setSize(rect.width, rect.height, false);
+  camera.aspect = rect.width / Math.max(rect.height, 1);
+  camera.updateProjectionMatrix();
+  if (model && activeView !== 'BLUEPRINT') setCameraView(activeView);
+}
+
+new ResizeObserver(() => resize()).observe(viewport);
+
+function detachPinkPins(source) {
+  if (!source?.isMesh || !source.geometry.index) return null;
+
+  const geometry = source.geometry;
+  const position = geometry.attributes.position;
+  const index = geometry.index;
+  const v0 = new THREE.Vector3();
+  const v1 = new THREE.Vector3();
+  const v2 = new THREE.Vector3();
+  const center = new THREE.Vector3();
+  const pinIndices = [];
+  const keepIndices = [];
+
+  for (let i = 0; i < index.count; i += 3) {
+    const a = index.getX(i);
+    const b = index.getX(i + 1);
+    const c = index.getX(i + 2);
+    v0.fromBufferAttribute(position, a).applyMatrix4(source.matrixWorld);
+    v1.fromBufferAttribute(position, b).applyMatrix4(source.matrixWorld);
+    v2.fromBufferAttribute(position, c).applyMatrix4(source.matrixWorld);
+    center.copy(v0).add(v1).add(v2).multiplyScalar(1 / 3);
+    (center.x < -15 ? pinIndices : keepIndices).push(a, b, c);
+  }
+
+  if (!pinIndices.length || !keepIndices.length) return null;
+
+  const pinGeometry = geometry.clone();
+  pinGeometry.setIndex(pinIndices);
+  pinGeometry.computeVertexNormals();
+  const pins = new THREE.Mesh(pinGeometry, source.material);
+  pins.name = '_00_stackchan450_1_3_pins';
+  pins.position.copy(source.position);
+  pins.quaternion.copy(source.quaternion);
+  pins.scale.copy(source.scale);
+  source.parent.add(pins);
+
+  geometry.setIndex(keepIndices);
+  geometry.computeVertexNormals();
+  return pins;
+}
+
+function detachGroupDSlice(source) {
+  if (!source?.isMesh || !source.geometry.index) return null;
+
+  const box = new THREE.Box3().setFromObject(source);
+  const depth = 15.5;
+  const zCut = box.max.z - depth;
+  const geometry = source.geometry;
+  const position = geometry.attributes.position;
+  const index = geometry.index;
+  const v0 = new THREE.Vector3();
+  const v1 = new THREE.Vector3();
+  const v2 = new THREE.Vector3();
+  const center = new THREE.Vector3();
+  const sliceIndices = [];
+  const keepIndices = [];
+
+  for (let i = 0; i < index.count; i += 3) {
+    const a = index.getX(i);
+    const b = index.getX(i + 1);
+    const c = index.getX(i + 2);
+    v0.fromBufferAttribute(position, a).applyMatrix4(source.matrixWorld);
+    v1.fromBufferAttribute(position, b).applyMatrix4(source.matrixWorld);
+    v2.fromBufferAttribute(position, c).applyMatrix4(source.matrixWorld);
+    center.copy(v0).add(v1).add(v2).multiplyScalar(1 / 3);
+    (center.z >= zCut ? sliceIndices : keepIndices).push(a, b, c);
+  }
+
+  if (!sliceIndices.length || !keepIndices.length) return null;
+
+  const sliceGeometry = geometry.clone();
+  sliceGeometry.setIndex(sliceIndices);
+  sliceGeometry.computeVertexNormals();
+  const slice = new THREE.Mesh(sliceGeometry, source.material);
+  slice.name = '_00_stackchan450_1_1_groupD';
+  slice.position.copy(source.position);
+  slice.quaternion.copy(source.quaternion);
+  slice.scale.copy(source.scale);
+  source.parent.add(slice);
+
+  geometry.setIndex(keepIndices);
+  geometry.computeVertexNormals();
+  return slice;
+}
+
+function prepareExplodedView() {
+  model.updateMatrixWorld(true);
+  const pinPart = detachPinkPins(model.getObjectByName('_00_stackchan450_1_3'));
+  const groupD = detachGroupDSlice(model.getObjectByName('_00_stackchan450_1_1'));
+
+  const parts = [
+    { name: '_00_stackchan450_1_8', direction: new THREE.Vector3(0, 0, 1), distance: 0.48 },
+    { name: '_00_stackchan450_1_6', direction: new THREE.Vector3(0, 0, 1), distance: 0.40 },
+    { name: '_00_stackchan450_1_3', direction: new THREE.Vector3(0, 0, 1), distance: 0.36 },
+    { part: groupD, direction: new THREE.Vector3(0, 0, 1), distance: 0.18 },
+    { name: '_00_stackchan450_1_2', direction: new THREE.Vector3(-1, 0, 0), distance: 0.32 },
+    { name: '_00_stackchan450_1_4', direction: new THREE.Vector3(-1, 0, 0), distance: 0.32 },
+    { part: pinPart, direction: new THREE.Vector3(-1, 0, 0), distance: 0.32 },
+    { name: '_00_stackchan450_2', direction: new THREE.Vector3(0, -1, 0), distance: 0.24 },
+    { name: '_00_stackchan450_2_3', direction: new THREE.Vector3(0, -1, 0), distance: 0.40 },
+    { name: '_00_stackchan450_3', direction: new THREE.Vector3(0, -1, 0), distance: 0.72 },
+  ];
+
+  const size = new THREE.Box3().setFromObject(model).getSize(new THREE.Vector3()).length();
+
+  parts.forEach(({ name, part: givenPart, direction, distance }) => {
+    const part = givenPart || model.getObjectByName(name);
+    if (!part?.parent) return;
+    const worldStart = part.getWorldPosition(new THREE.Vector3());
+    const worldEnd = worldStart.clone().addScaledVector(direction, size * distance);
+    const localStart = part.parent.worldToLocal(worldStart.clone());
+    const localEnd = part.parent.worldToLocal(worldEnd);
+    explodedParts.push({ part, position: part.position.clone(), offset: localEnd.sub(localStart) });
+  });
+}
+
+function buildPartsList() {
+  partCatalog.forEach(({ label, name }, index) => {
+    const part = model.getObjectByName(name);
+    const row = document.createElement('button');
+    row.className = 'part-row';
+    if (!part) {
+      row.classList.add('off');
+      row.innerHTML = `<span class="part-index">${String(index + 1).padStart(2, '0')}</span><b>${label}</b><i>UNAVAILABLE</i>`;
+      partsEl.append(row);
+      return;
+    }
+
+    row.innerHTML = `<span class="part-index">${String(index + 1).padStart(2, '0')}</span><b>${label}</b><i>VISIBLE</i>`;
+    row.onclick = () => {
+      part.visible = !part.visible;
+      row.classList.toggle('off', !part.visible);
+      row.querySelector('i').textContent = part.visible ? 'VISIBLE' : 'HIDDEN';
+    };
+    partRows.set(name, row);
+    partsEl.append(row);
+  });
+}
+
+function toggleExplodedView() {
+  if (!explodedParts.length) return;
+  exploded = !exploded;
+  document.querySelector('#explode').textContent = `EXPLODED VIEW / ${exploded ? 'ON' : 'OFF'}`;
+  document.querySelector('#assemblyMode').textContent = exploded
+    ? 'M5STACK APP ASSET / EXPLODED VIEW'
+    : 'M5STACK APP ASSET / FULL ASSEMBLY';
+}
+
+function updateExplodedView() {
+  explosionProgress = THREE.MathUtils.damp(explosionProgress, exploded ? 1 : 0, 5.5, 1 / 60);
+  explodedParts.forEach(({ part, position, offset }) =>
+    part.position.copy(position).addScaledVector(offset, explosionProgress)
+  );
+}
+
+window.addEventListener('resize', resize);
+resize();
+
+new GLTFLoader().load('/models/stackchan/stack_chan_model.glb', gltf => {
+  model = gltf.scene;
+  model.rotation.x = -Math.PI / 2;
+  scene.add(model);
+
+  let meshes = 0;
+  let triangles = 0;
+  model.traverse(child => {
+    if (!child.isMesh) return;
+    meshes++;
+    triangles += child.geometry.index
+      ? child.geometry.index.count / 3
+      : child.geometry.attributes.position.count / 3;
+  });
+
+  document.querySelector('#meshCount').textContent = meshes;
+  document.querySelector('#triangleCount').textContent = Math.round(triangles).toLocaleString();
+  document.querySelector('#modelStatus').textContent = 'READY';
+  document.querySelector('#progress').style.width = '100%';
+  document.querySelector('#loadingText').textContent = 'OFFICIAL MODEL READY';
+  document.querySelector('#loadStatus').textContent = 'OFFICIAL MODEL READY / GLB';
+  document.querySelector('.loading').classList.add('done');
+
+  prepareExplodedView();
+  buildPartsList();
+  requestAnimationFrame(() => requestAnimationFrame(() => setCameraView('ISO')));
+}, event => {
+  if (event.total) {
+    const pct = Math.round(event.loaded / event.total * 100);
+    document.querySelector('#progress').style.width = `${pct}%`;
+    document.querySelector('#loadingText').textContent = `LOADING STACK_CHAN_MODEL.GLB / ${String(pct).padStart(2, '0')}%`;
+    document.querySelector('#loadStatus').textContent = `LOADING OFFICIAL MODEL / ${String(pct).padStart(2, '0')}%`;
+  }
+}, () => {
+  document.querySelector('#loadingText').textContent = 'OFFICIAL MODEL UNAVAILABLE';
+  document.querySelector('#loadStatus').textContent = 'LOAD FAILED';
+  document.querySelector('#modelStatus').textContent = 'FAILED';
+});
+
+document.querySelectorAll('#cameraViews .view').forEach(button =>
+  button.onclick = () => setCameraView(button.dataset.view)
+);
+
+document.querySelector('#wireframe').onclick = event => {
+  if (!model) return;
+  const enabled = event.currentTarget.dataset.enabled !== 'true';
+  model.traverse(child => {
+    if (!child.isMesh) return;
+    for (const material of Array.isArray(child.material) ? child.material : [child.material]) {
+      material.wireframe = enabled;
+    }
+  });
+  event.currentTarget.dataset.enabled = enabled;
+  event.currentTarget.textContent = `WIREFRAME / ${enabled ? 'ON' : 'OFF'}`;
+};
+
+document.querySelector('#explode').onclick = toggleExplodedView;
+document.querySelector('#reset').onclick = () => setCameraView('ISO');
+
+document.querySelector('#theme').onclick = () => {
+  const blue = document.body.dataset.theme === 'blue';
+  document.body.dataset.theme = blue ? 'dark' : 'blue';
+  document.querySelector('#theme').textContent = `THEME / ${blue ? 'DARK' : 'BLUEPRINT'}`;
+};
+
+function animate() {
+  requestAnimationFrame(animate);
+  updateExplodedView();
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+animate();
