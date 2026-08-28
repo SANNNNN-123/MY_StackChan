@@ -87,6 +87,23 @@ const partCatalog = [
   { label: 'Pink connector', name: '_00_stackchan450_1_2' },
   { label: 'Side stub', name: '_00_stackchan450_1_4' },
   { label: 'Connector pins', name: '_00_stackchan450_1_3_pins' },
+  {
+    label: 'Front internals',
+    names: [
+      '_00_stackchan450_1_5',
+      '_00_stackchan450_1_7',
+      '_00_stackchan450_1_9',
+    ],
+  },
+  { label: 'Internal frame', names: [
+    '_00_stackchan450_1_10',
+    '_00_stackchan450_1_11',
+    '_00_stackchan450_1_12',
+    '_00_stackchan450_1_12_rail',
+    '_00_stackchan450_1_13',
+    '_00_stackchan450_1_14',
+    '_00_stackchan450_1_14_round',
+  ] },
   { label: 'Main body', name: '_00_stackchan450_2' },
   { label: 'Servo section', name: '_00_stackchan450_2_3' },
   { label: 'Base', name: '_00_stackchan450_3' },
@@ -288,16 +305,170 @@ function detachGroupDSlice(source) {
   return slice;
 }
 
+function detachFrameRail(source) {
+  if (!source?.isMesh || !source.geometry.index) return null;
+
+  const geometry = source.geometry;
+  const position = geometry.attributes.position;
+  const index = geometry.index;
+  const v0 = new THREE.Vector3();
+  const v1 = new THREE.Vector3();
+  const v2 = new THREE.Vector3();
+  const center = new THREE.Vector3();
+  const railIndices = [];
+  const keepIndices = [];
+
+  for (let i = 0; i < index.count; i += 3) {
+    const a = index.getX(i);
+    const b = index.getX(i + 1);
+    const c = index.getX(i + 2);
+    v0.fromBufferAttribute(position, a).applyMatrix4(source.matrixWorld);
+    v1.fromBufferAttribute(position, b).applyMatrix4(source.matrixWorld);
+    v2.fromBufferAttribute(position, c).applyMatrix4(source.matrixWorld);
+    center.copy(v0).add(v1).add(v2).multiplyScalar(1 / 3);
+    (center.x > 18 && center.y <= 22 ? railIndices : keepIndices).push(a, b, c);
+  }
+
+  if (!railIndices.length || !keepIndices.length) return null;
+
+  const railGeometry = geometry.clone();
+  railGeometry.setIndex(railIndices);
+  railGeometry.computeVertexNormals();
+  const rail = new THREE.Mesh(railGeometry, source.material);
+  rail.name = '_00_stackchan450_1_12_rail';
+  rail.position.copy(source.position);
+  rail.quaternion.copy(source.quaternion);
+  rail.scale.copy(source.scale);
+  source.parent.add(rail);
+
+  geometry.setIndex(keepIndices);
+  geometry.computeVertexNormals();
+  return rail;
+}
+
+function detachRoundLight(source) {
+  if (!source?.isMesh || !source.geometry.index) return null;
+
+  const geometry = source.geometry;
+  const position = geometry.attributes.position;
+  const index = geometry.index;
+  const v0 = new THREE.Vector3();
+  const v1 = new THREE.Vector3();
+  const v2 = new THREE.Vector3();
+  const center = new THREE.Vector3();
+  const triCount = index.count / 3;
+  const triCenters = [];
+
+  for (let i = 0; i < triCount; i++) {
+    const a = index.getX(i * 3);
+    const b = index.getX(i * 3 + 1);
+    const c = index.getX(i * 3 + 2);
+    v0.fromBufferAttribute(position, a).applyMatrix4(source.matrixWorld);
+    v1.fromBufferAttribute(position, b).applyMatrix4(source.matrixWorld);
+    v2.fromBufferAttribute(position, c).applyMatrix4(source.matrixWorld);
+    center.copy(v0).add(v1).add(v2).multiplyScalar(1 / 3);
+    triCenters.push(center.clone());
+  }
+
+  const edgeMap = new Map();
+  const edgeKey = (a, b) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+  for (let i = 0; i < triCount; i++) {
+    const a = index.getX(i * 3);
+    const b = index.getX(i * 3 + 1);
+    const c = index.getX(i * 3 + 2);
+    for (const [e1, e2] of [[a, b], [b, c], [c, a]]) {
+      const k = edgeKey(e1, e2);
+      if (!edgeMap.has(k)) edgeMap.set(k, []);
+      edgeMap.get(k).push(i);
+    }
+  }
+
+  const adj = Array.from({ length: triCount }, () => []);
+  for (const tris of edgeMap.values()) {
+    if (tris.length === 2) {
+      adj[tris[0]].push(tris[1]);
+      adj[tris[1]].push(tris[0]);
+    }
+  }
+
+  const visited = new Uint8Array(triCount);
+  const roundTriIndices = new Set();
+  for (let start = 0; start < triCount; start++) {
+    if (visited[start]) continue;
+    const stack = [start];
+    visited[start] = 1;
+    const comp = [];
+    while (stack.length) {
+      const t = stack.pop();
+      comp.push(t);
+      for (const n of adj[t]) {
+        if (!visited[n]) {
+          visited[n] = 1;
+          stack.push(n);
+        }
+      }
+    }
+
+    const box = new THREE.Box3();
+    for (const t of comp) box.expandByPoint(triCenters[t]);
+    const size = box.getSize(new THREE.Vector3());
+    const cen = box.getCenter(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z);
+    const isRoundLight =
+      maxDim <= 3 &&
+      cen.x > 19 && cen.x < 25 &&
+      cen.y > 21 && cen.y < 23.5 &&
+      cen.z > -7 && cen.z < -3;
+
+    if (isRoundLight) comp.forEach(t => roundTriIndices.add(t));
+  }
+
+  if (!roundTriIndices.size || roundTriIndices.size === triCount) return null;
+
+  const roundIndices = [];
+  const keepIndices = [];
+  for (let i = 0; i < triCount; i++) {
+    const a = index.getX(i * 3);
+    const b = index.getX(i * 3 + 1);
+    const c = index.getX(i * 3 + 2);
+    (roundTriIndices.has(i) ? roundIndices : keepIndices).push(a, b, c);
+  }
+
+  if (!roundIndices.length || !keepIndices.length) return null;
+
+  const roundGeometry = geometry.clone();
+  roundGeometry.setIndex(roundIndices);
+  roundGeometry.computeVertexNormals();
+  const round = new THREE.Mesh(roundGeometry, source.material);
+  round.name = '_00_stackchan450_1_14_round';
+  round.position.copy(source.position);
+  round.quaternion.copy(source.quaternion);
+  round.scale.copy(source.scale);
+  source.parent.add(round);
+
+  geometry.setIndex(keepIndices);
+  geometry.computeVertexNormals();
+  return round;
+}
+
 function prepareExplodedView() {
   model.updateMatrixWorld(true);
   const pinPart = detachPinkPins(model.getObjectByName('_00_stackchan450_1_3'));
   const groupD = detachGroupDSlice(model.getObjectByName('_00_stackchan450_1_1'));
+  const frameRail = detachFrameRail(model.getObjectByName('_00_stackchan450_1_12'));
+  const roundLight = detachRoundLight(model.getObjectByName('_00_stackchan450_1_14'));
 
   const parts = [
     { name: '_00_stackchan450_1_8', direction: new THREE.Vector3(0, 0, 1), distance: 0.48 },
     { name: '_00_stackchan450_1_6', direction: new THREE.Vector3(0, 0, 1), distance: 0.40 },
     { name: '_00_stackchan450_1_3', direction: new THREE.Vector3(0, 0, 1), distance: 0.36 },
     { part: groupD, direction: new THREE.Vector3(0, 0, 1), distance: 0.18 },
+    { part: frameRail, direction: new THREE.Vector3(0, 0, -1), distance: 0.48 },
+    { name: '_00_stackchan450_1_11', direction: new THREE.Vector3(0, 0, -1), distance: 0.48 },
+    { name: '_00_stackchan450_1_10', direction: new THREE.Vector3(0, 0, -1), distance: 0.48 },
+    { name: '_00_stackchan450_1_12', direction: new THREE.Vector3(0, 0, -1), distance: 0.48 },
+    { name: '_00_stackchan450_1_13', direction: new THREE.Vector3(0, 0, -1), distance: 0.48 },
+    { part: roundLight, direction: new THREE.Vector3(0, 0, -1), distance: 0.48 },
     { name: '_00_stackchan450_1_2', direction: new THREE.Vector3(-1, 0, 0), distance: 0.32 },
     { name: '_00_stackchan450_1_4', direction: new THREE.Vector3(-1, 0, 0), distance: 0.32 },
     { part: pinPart, direction: new THREE.Vector3(-1, 0, 0), distance: 0.32 },
@@ -320,24 +491,27 @@ function prepareExplodedView() {
 }
 
 function buildPartsList() {
-  partCatalog.forEach(({ label, name }, index) => {
-    const part = model.getObjectByName(name);
+  partCatalog.forEach(({ label, name, names }, index) => {
+    const partNames = names ?? (name ? [name] : []);
+    const parts = partNames.map(partName => model.getObjectByName(partName)).filter(Boolean);
     const row = document.createElement('button');
     row.className = 'part-row';
-    if (!part) {
+    if (!parts.length) {
       row.classList.add('off');
       row.innerHTML = `<span class="part-index">${String(index + 1).padStart(2, '0')}</span><b>${label}</b><i>UNAVAILABLE</i>`;
       partsEl.append(row);
       return;
     }
 
-    row.innerHTML = `<span class="part-index">${String(index + 1).padStart(2, '0')}</span><b>${label}</b><i>VISIBLE</i>`;
-    row.onclick = () => {
-      part.visible = !part.visible;
-      row.classList.toggle('off', !part.visible);
-      row.querySelector('i').textContent = part.visible ? 'VISIBLE' : 'HIDDEN';
+    const setVisible = visible => {
+      parts.forEach(part => { part.visible = visible; });
+      row.classList.toggle('off', !visible);
+      row.querySelector('i').textContent = visible ? 'VISIBLE' : 'HIDDEN';
     };
-    partRows.set(name, row);
+
+    row.innerHTML = `<span class="part-index">${String(index + 1).padStart(2, '0')}</span><b>${label}</b><i>VISIBLE</i>`;
+    row.onclick = () => setVisible(!parts.every(part => part.visible));
+    partRows.set(partNames.join('+'), row);
     partsEl.append(row);
   });
 }
