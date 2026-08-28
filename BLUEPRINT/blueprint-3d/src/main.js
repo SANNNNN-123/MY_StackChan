@@ -112,7 +112,7 @@ const explodedParts = [];
 const partRows = new Map();
 
 const cameraViews = {
-  ISO: [1, 0.7, 1],
+  ISO: [1, 0.7, -1],
   FRONT: [0, 0.06, 1],
   SIDE: [-1, 0.06, 0],
   REAR: [0, 0.06, -1],
@@ -122,6 +122,8 @@ const cameraViews = {
 
 let activeView = 'ISO';
 const fitSphere = new THREE.Sphere();
+// Match ~2 OrbitControls wheel zoom-in steps (default zoomSpeed, pow(0.95, n)).
+const ISO_ZOOM_IN = Math.pow(0.95, 8);
 
 function fitDistance(box, name) {
   const rect = viewport.getBoundingClientRect();
@@ -169,7 +171,7 @@ function setCameraView(name = 'ISO') {
   const box = new THREE.Box3().setFromObject(model);
   const center = box.getCenter(new THREE.Vector3());
   const size = box.getSize(new THREE.Vector3());
-  const distance = fitDistance(box, name);
+  const distance = fitDistance(box, name) * (name === 'ISO' ? ISO_ZOOM_IN : 1);
   const direction = new THREE.Vector3(...cameraViews[name]).normalize();
 
   controls.target.copy(center);
@@ -335,13 +337,28 @@ function buildPartsList() {
   });
 }
 
-function toggleExplodedView() {
-  if (!explodedParts.length) return;
-  exploded = !exploded;
+function applyExplodedState(on, { immediate = false } = {}) {
+  exploded = on;
+  if (immediate) {
+    explosionProgress = on ? 1 : 0;
+    explodedParts.forEach(({ part, position, offset }) =>
+      part.position.copy(position).addScaledVector(offset, explosionProgress)
+    );
+  }
   document.querySelector('#explode').textContent = `EXPLODED VIEW / ${exploded ? 'ON' : 'OFF'}`;
   document.querySelector('#assemblyMode').textContent = exploded
     ? 'M5STACK APP ASSET / EXPLODED VIEW'
     : 'M5STACK APP ASSET / FULL ASSEMBLY';
+}
+
+function applyDefaultView() {
+  applyExplodedState(true, { immediate: true });
+  setCameraView('ISO');
+}
+
+function toggleExplodedView() {
+  if (!explodedParts.length) return;
+  applyExplodedState(!exploded);
 }
 
 function updateExplodedView() {
@@ -379,7 +396,7 @@ new GLTFLoader().load('/models/stackchan/stack_chan_model.glb', gltf => {
 
   prepareExplodedView();
   buildPartsList();
-  requestAnimationFrame(() => requestAnimationFrame(() => setCameraView('ISO')));
+  requestAnimationFrame(() => requestAnimationFrame(() => applyDefaultView()));
 }, event => {
   if (event.total) {
     const pct = Math.round(event.loaded / event.total * 100);
@@ -411,7 +428,7 @@ document.querySelector('#wireframe').onclick = event => {
 };
 
 document.querySelector('#explode').onclick = toggleExplodedView;
-document.querySelector('#reset').onclick = () => setCameraView('ISO');
+document.querySelector('#reset').onclick = () => applyDefaultView();
 
 document.querySelector('#theme').onclick = () => {
   const blue = document.body.dataset.theme === 'blue';
