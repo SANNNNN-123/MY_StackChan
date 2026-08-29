@@ -84,9 +84,14 @@ const partCatalog = [
   { label: 'CoreS3 module', name: '_00_stackchan450_1_3' },
   { label: 'M5 shell body', name: '_00_stackchan450_1_1' },
   { label: 'M5 shell front', name: '_00_stackchan450_1_1_groupD' },
-  { label: 'Pink connector', name: '_00_stackchan450_1_2' },
+  {
+    label: 'Pink connector',
+    names: [
+      '_00_stackchan450_1_2',
+      '_00_stackchan450_1_3_pins',
+    ],
+  },
   { label: 'Side stub', name: '_00_stackchan450_1_4' },
-  { label: 'Connector pins', name: '_00_stackchan450_1_3_pins' },
   {
     label: 'Front internals',
     names: [
