@@ -1,0 +1,16 @@
+# Dependencies
+node_modules/
+
+# Vite build output and local cache
+dist/
+.vite/
+
+# Local tooling and logs
+.DS_Store
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Unused duplicate download; the viewer uses models/stackchan/CoreS3.stl
+public/models/CoreS3.stl
