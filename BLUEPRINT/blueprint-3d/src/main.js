@@ -134,6 +134,7 @@ const partCatalog = [
   { label: 'USB-C port', name: '_00_stackchan450_3_5' },
   { label: 'Bottom plate', name: '_00_stackchan450_3_1_bottom' },
   { label: 'Base screws', name: '_00_stackchan450_3_4_base_screws' },
+  { label: 'Base plates', name: '_00_stackchan450_3_2' },
 ];
 
 const viewport = document.querySelector('#viewport');
@@ -503,6 +504,13 @@ function detachBaseDisc(source) {
 
 function detachUsbPort(source) {
   // Rear USB-C shell on the base (`_00_stackchan450_3_5`) — metal, reads black
+  if (!source?.parent?.parent) return null;
+  source.parent.parent.attach(source);
+  return source;
+}
+
+function detachBasePlates(source) {
+  // Two black rectangular foot pads on the base underside (`_00_stackchan450_3_2`)
   if (!source?.parent?.parent) return null;
   source.parent.parent.attach(source);
   return source;
@@ -934,6 +942,7 @@ function prepareExplodedView() {
   const blackPanel = detachBlackPanel(model.getObjectByName('_00_stackchan450_2_1'));
   const baseDisc = detachBaseDisc(model.getObjectByName('_00_stackchan450_3_3'));
   const usbPort = detachUsbPort(model.getObjectByName('_00_stackchan450_3_5'));
+  const basePlates = detachBasePlates(model.getObjectByName('_00_stackchan450_3_2'));
   const bottomPlate = detachBottomPlate(model.getObjectByName('_00_stackchan450_3_1'));
   const baseScrews = detachBaseScrews(model.getObjectByName('_00_stackchan450_3_4'));
   const leftScrew = detachLeftScrew(model.getObjectByName('_00_stackchan450_2_2'));
@@ -1001,6 +1010,8 @@ function prepareExplodedView() {
     { part: bottomPlate, direction: new THREE.Vector3(0, -1, 0), distance: 1.15 },
     // Four corner base screws — further −Y than the bottom plate
     { part: baseScrews, direction: new THREE.Vector3(0, -1, 0), distance: 1.38 },
+    // Two black underside foot pads — same −Y as base screws
+    { part: basePlates, direction: new THREE.Vector3(0, -1, 0), distance: 1.38 },
     // USB-C out −Z from the base rear; same Y as Base so it stays level
     {
       part: usbPort,
