@@ -117,6 +117,7 @@ const partCatalog = [
   { label: 'Side bearing', name: '_00_stackchan450_1_15' },
   { label: 'Main body', name: '_00_stackchan450_2' },
   { label: 'Side connector', name: '_00_stackchan450_2_11' },
+  { label: 'Left screw', name: '_00_stackchan450_2_2_left_screw' },
   {
     label: '7-pin connector',
     names: [
@@ -623,6 +624,126 @@ function detachRightScrew(source) {
   return screw;
 }
 
+function detachLeftScrew(source) {
+  if (!source?.isMesh || !source.geometry.index) return null;
+
+  const geometry = source.geometry;
+  const position = geometry.attributes.position;
+  const index = geometry.index;
+  const triCount = index.count / 3;
+  const v0 = new THREE.Vector3();
+  const v1 = new THREE.Vector3();
+  const v2 = new THREE.Vector3();
+
+  // Tight tip region — middle clean cut that looked good on the screw itself
+  const inTipRegion = c =>
+    c.x < -18.5 && c.x > -24 &&
+    Math.abs(c.y) < 3.2 &&
+    Math.abs(c.z + 17.7) < 3.2;
+
+  const parent = new Int32Array(triCount).fill(-1);
+  const find = i => (parent[i] < 0 ? i : (parent[i] = find(parent[i])));
+  const unite = (a, b) => {
+    a = find(a);
+    b = find(b);
+    if (a !== b) parent[b] = a;
+  };
+  const vertexToTris = new Map();
+  const add = (v, t) => {
+    if (!vertexToTris.has(v)) vertexToTris.set(v, []);
+    vertexToTris.get(v).push(t);
+  };
+  for (let t = 0; t < triCount; t++) {
+    const i = t * 3;
+    add(index.getX(i), t);
+    add(index.getX(i + 1), t);
+    add(index.getX(i + 2), t);
+  }
+  for (const tris of vertexToTris.values()) {
+    for (let i = 1; i < tris.length; i++) unite(tris[0], tris[i]);
+  }
+
+  const centers = new Array(triCount);
+  for (let t = 0; t < triCount; t++) {
+    const i = t * 3;
+    v0.fromBufferAttribute(position, index.getX(i)).applyMatrix4(source.matrixWorld);
+    v1.fromBufferAttribute(position, index.getX(i + 1)).applyMatrix4(source.matrixWorld);
+    v2.fromBufferAttribute(position, index.getX(i + 2)).applyMatrix4(source.matrixWorld);
+    centers[t] = v0.clone().add(v1).add(v2).multiplyScalar(1 / 3);
+  }
+
+  const groups = new Map();
+  for (let t = 0; t < triCount; t++) {
+    const root = find(t);
+    if (!groups.has(root)) groups.set(root, []);
+    groups.get(root).push(t);
+  }
+
+  const screwTri = new Uint8Array(triCount);
+  const discardTri = new Uint8Array(triCount);
+
+  for (const tris of groups.values()) {
+    const inRegion = tris.filter(t => inTipRegion(centers[t]));
+    if (inRegion.length < 8) continue;
+
+    const box = new THREE.Box3();
+    for (const t of tris) {
+      const i = t * 3;
+      box.expandByPoint(new THREE.Vector3().fromBufferAttribute(position, index.getX(i)).applyMatrix4(source.matrixWorld));
+      box.expandByPoint(new THREE.Vector3().fromBufferAttribute(position, index.getX(i + 1)).applyMatrix4(source.matrixWorld));
+      box.expandByPoint(new THREE.Vector3().fromBufferAttribute(position, index.getX(i + 2)).applyMatrix4(source.matrixWorld));
+    }
+    const size = box.getSize(new THREE.Vector3());
+    const cen = box.getCenter(new THREE.Vector3());
+    const dims = [size.x, size.y, size.z].sort((a, b) => a - b);
+    const maxDim = dims[2];
+    if (cen.x > -18 || Math.abs(cen.y) > 4 || Math.abs(cen.z + 17.7) > 4) continue;
+    if (maxDim > 8) continue;
+
+    const isRoundFace = dims[0] < 0.2 && dims[1] > 1.5 && dims[2] > 1.5 && (dims[1] / dims[2]) > 0.7;
+    const isOuterCap = dims[0] < 0.2 && cen.x < -23 && dims[2] < 5 && dims[1] > 1.5;
+    const isSolid = dims[0] >= 0.15;
+    if (!isRoundFace && !isOuterCap && !isSolid) continue;
+
+    for (const t of tris) screwTri[t] = 1;
+  }
+
+  // Hole scraps that aren't part of the clean knurl: delete from shell (don't attach to screw)
+  for (let t = 0; t < triCount; t++) {
+    if (screwTri[t]) continue;
+    if (!inTipRegion(centers[t])) continue;
+    discardTri[t] = 1;
+  }
+
+  const screwIndices = [];
+  const keepIndices = [];
+  for (let t = 0; t < triCount; t++) {
+    const i = t * 3;
+    const a = index.getX(i);
+    const b = index.getX(i + 1);
+    const c = index.getX(i + 2);
+    if (screwTri[t]) screwIndices.push(a, b, c);
+    else if (!discardTri[t]) keepIndices.push(a, b, c);
+  }
+
+  if (!screwIndices.length || !keepIndices.length) return null;
+
+  const screwGeometry = geometry.clone();
+  screwGeometry.setIndex(screwIndices);
+  screwGeometry.computeVertexNormals();
+  const screw = new THREE.Mesh(screwGeometry, source.material);
+  screw.name = '_00_stackchan450_2_2_left_screw';
+  screw.position.copy(source.position);
+  screw.quaternion.copy(source.quaternion);
+  screw.scale.copy(source.scale);
+  source.parent.add(screw);
+  if (source.parent.parent) source.parent.parent.attach(screw);
+
+  geometry.setIndex(keepIndices);
+  geometry.computeVertexNormals();
+  return screw;
+}
+
 function prepareExplodedView() {
   model.updateMatrixWorld(true);
   const pinPart = detachPinkPins(model.getObjectByName('_00_stackchan450_1_3'));
@@ -632,6 +753,7 @@ function prepareExplodedView() {
   const sideConnector = detachSideConnector(model.getObjectByName('_00_stackchan450_2_11'));
   detachSevenPinPins(model.getObjectByName('_00_stackchan450_2_14'), sideConnector);
   const sevenPinHousing = detachSevenPinHousing(model.getObjectByName('_00_stackchan450_2_1'));
+  const leftScrew = detachLeftScrew(model.getObjectByName('_00_stackchan450_2_2'));
   const rightScrew = detachRightScrew(model.getObjectByName('_00_stackchan450_2_7'));
 
   const parts = [
@@ -652,6 +774,14 @@ function prepareExplodedView() {
     { part: pinPart, direction: new THREE.Vector3(-1, 0, 0), distance: 0.32 },
     { name: '_00_stackchan450_2', direction: new THREE.Vector3(0, -1, 0), distance: 0.24 },
     { part: sideConnector, direction: new THREE.Vector3(0, -1, 0), distance: 0.40 },
+    // −X out from left wall; same Y as Main body so it stays level with the seat
+    {
+      part: leftScrew,
+      directions: [
+        { direction: new THREE.Vector3(-1, 0, 0), distance: 0.40 },
+        { direction: new THREE.Vector3(0, -1, 0), distance: 0.24 },
+      ],
+    },
     { name: '_00_stackchan450_2_14', direction: new THREE.Vector3(0, -1, 0), distance: 0.40 },
     { part: sevenPinHousing, direction: new THREE.Vector3(0, -1, 0), distance: 0.40 },
     // +X separate from hole; same Y as Main body so it doesn't float when body drops
