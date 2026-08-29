@@ -119,6 +119,7 @@ const partCatalog = [
       '_00_stackchan450_2_1_header',
     ],
   },
+  { label: 'Right screw', name: '_00_stackchan450_2_7_screw' },
   { label: 'Servo section', name: '_00_stackchan450_2_3' },
   { label: 'Base', name: '_00_stackchan450_3' },
 ];
@@ -570,6 +571,53 @@ function detachSevenPinHousing(source) {
   return header;
 }
 
+function detachRightScrew(source) {
+  if (!source?.isMesh || !source.geometry.index) return null;
+
+  const geometry = source.geometry;
+  const position = geometry.attributes.position;
+  const index = geometry.index;
+  const v0 = new THREE.Vector3();
+  const v1 = new THREE.Vector3();
+  const v2 = new THREE.Vector3();
+  const center = new THREE.Vector3();
+  const screwIndices = [];
+  const keepIndices = [];
+
+  for (let i = 0; i < index.count; i += 3) {
+    const a = index.getX(i);
+    const b = index.getX(i + 1);
+    const c = index.getX(i + 2);
+    v0.fromBufferAttribute(position, a).applyMatrix4(source.matrixWorld);
+    v1.fromBufferAttribute(position, b).applyMatrix4(source.matrixWorld);
+    v2.fromBufferAttribute(position, c).applyMatrix4(source.matrixWorld);
+    center.copy(v0).add(v1).add(v2).multiplyScalar(1 / 3);
+    // Hex-socket screw on the right/rear inner wall (meshed into 2_7 accents)
+    const isScrew =
+      center.x > 8 && center.x < 16 &&
+      Math.abs(center.y) < 3 &&
+      center.z > -41 && center.z < -34;
+    (isScrew ? screwIndices : keepIndices).push(a, b, c);
+  }
+
+  if (!screwIndices.length || !keepIndices.length) return null;
+
+  const screwGeometry = geometry.clone();
+  screwGeometry.setIndex(screwIndices);
+  screwGeometry.computeVertexNormals();
+  const screw = new THREE.Mesh(screwGeometry, source.material);
+  screw.name = '_00_stackchan450_2_7_screw';
+  screw.position.copy(source.position);
+  screw.quaternion.copy(source.quaternion);
+  screw.scale.copy(source.scale);
+  source.parent.add(screw);
+  if (source.parent.parent) source.parent.parent.attach(screw);
+
+  geometry.setIndex(keepIndices);
+  geometry.computeVertexNormals();
+  return screw;
+}
+
 function prepareExplodedView() {
   model.updateMatrixWorld(true);
   const pinPart = detachPinkPins(model.getObjectByName('_00_stackchan450_1_3'));
@@ -579,6 +627,7 @@ function prepareExplodedView() {
   const sideConnector = detachSideConnector(model.getObjectByName('_00_stackchan450_2_11'));
   detachSevenPinPins(model.getObjectByName('_00_stackchan450_2_14'), sideConnector);
   const sevenPinHousing = detachSevenPinHousing(model.getObjectByName('_00_stackchan450_2_1'));
+  const rightScrew = detachRightScrew(model.getObjectByName('_00_stackchan450_2_7'));
 
   const parts = [
     { name: '_00_stackchan450_1_8', direction: new THREE.Vector3(0, 0, 1), distance: 0.48 },
@@ -600,17 +649,29 @@ function prepareExplodedView() {
     { part: sideConnector, direction: new THREE.Vector3(0, -1, 0), distance: 0.40 },
     { name: '_00_stackchan450_2_14', direction: new THREE.Vector3(0, -1, 0), distance: 0.40 },
     { part: sevenPinHousing, direction: new THREE.Vector3(0, -1, 0), distance: 0.40 },
+    // +X separate from hole; same Y as Main body so it doesn't float when body drops
+    {
+      part: rightScrew,
+      directions: [
+        { direction: new THREE.Vector3(1, 0, 0), distance: 0.40 },
+        { direction: new THREE.Vector3(0, -1, 0), distance: 0.24 },
+      ],
+    },
     { name: '_00_stackchan450_2_3', direction: new THREE.Vector3(0, -1, 0), distance: 0.40 },
     { name: '_00_stackchan450_3', direction: new THREE.Vector3(0, -1, 0), distance: 0.72 },
   ];
 
   const size = new THREE.Box3().setFromObject(model).getSize(new THREE.Vector3()).length();
 
-  parts.forEach(({ name, part: givenPart, direction, distance }) => {
+  parts.forEach(({ name, part: givenPart, direction, distance, directions }) => {
     const part = givenPart || model.getObjectByName(name);
     if (!part?.parent) return;
     const worldStart = part.getWorldPosition(new THREE.Vector3());
-    const worldEnd = worldStart.clone().addScaledVector(direction, size * distance);
+    const worldEnd = worldStart.clone();
+    const steps = directions ?? [{ direction, distance }];
+    steps.forEach(({ direction: dir, distance: dist }) => {
+      worldEnd.addScaledVector(dir, size * dist);
+    });
     const localStart = part.parent.worldToLocal(worldStart.clone());
     const localEnd = part.parent.worldToLocal(worldEnd);
     explodedParts.push({ part, position: part.position.clone(), offset: localEnd.sub(localStart) });
