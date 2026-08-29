@@ -130,6 +130,7 @@ const partCatalog = [
   { label: 'Right screw', name: '_00_stackchan450_2_7_screw' },
   { label: 'Servo section', name: '_00_stackchan450_2_3' },
   { label: 'Base', name: '_00_stackchan450_3' },
+  { label: 'Base disc', name: '_00_stackchan450_3_3' },
 ];
 
 const viewport = document.querySelector('#viewport');
@@ -487,6 +488,13 @@ function detachBlackPanel(source) {
   return source;
 }
 
+function detachBaseDisc(source) {
+  // White round plate on top of the base (`_00_stackchan450_3_3`)
+  if (!source?.parent?.parent) return null;
+  source.parent.parent.attach(source);
+  return source;
+}
+
 function detachSevenPinPins(source, sideConnector) {
   if (!source?.isMesh || !source.geometry.index || !source.parent?.parent) return null;
 
@@ -810,6 +818,7 @@ function prepareExplodedView() {
   detachSevenPinPins(model.getObjectByName('_00_stackchan450_2_14'), sideConnector);
   const sevenPinHousing = detachSevenPinHousing(model.getObjectByName('_00_stackchan450_2_1'));
   const blackPanel = detachBlackPanel(model.getObjectByName('_00_stackchan450_2_1'));
+  const baseDisc = detachBaseDisc(model.getObjectByName('_00_stackchan450_3_3'));
   const leftScrew = detachLeftScrew(model.getObjectByName('_00_stackchan450_2_2'));
   const mesh27 = model.getObjectByName('_00_stackchan450_2_7');
   const rightScrew = detachRightScrew(mesh27);
@@ -868,7 +877,9 @@ function prepareExplodedView() {
       ],
     },
     { name: '_00_stackchan450_2_3', direction: new THREE.Vector3(0, -1, 0), distance: 0.40 },
-    { name: '_00_stackchan450_3', direction: new THREE.Vector3(0, -1, 0), distance: 0.72 },
+    // Between servo (−Y 0.40) and base (−Y 0.92)
+    { part: baseDisc, direction: new THREE.Vector3(0, -1, 0), distance: 0.75 },
+    { name: '_00_stackchan450_3', direction: new THREE.Vector3(0, -1, 0), distance: 0.92 },
   ];
 
   const size = new THREE.Box3().setFromObject(model).getSize(new THREE.Vector3()).length();
