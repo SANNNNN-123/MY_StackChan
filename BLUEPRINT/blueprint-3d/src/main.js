@@ -112,6 +112,13 @@ const partCatalog = [
   { label: 'Side bearing', name: '_00_stackchan450_1_15' },
   { label: 'Main body', name: '_00_stackchan450_2' },
   { label: 'Side connector', name: '_00_stackchan450_2_11' },
+  {
+    label: '7-pin connector',
+    names: [
+      '_00_stackchan450_2_14',
+      '_00_stackchan450_2_1_header',
+    ],
+  },
   { label: 'Servo section', name: '_00_stackchan450_2_3' },
   { label: 'Base', name: '_00_stackchan450_3' },
 ];
@@ -464,6 +471,105 @@ function detachSideConnector(source) {
   return source;
 }
 
+function detachSevenPinPins(source, sideConnector) {
+  if (!source?.isMesh || !source.geometry.index || !source.parent?.parent) return null;
+
+  const geometry = source.geometry;
+  const position = geometry.attributes.position;
+  const index = geometry.index;
+  const v0 = new THREE.Vector3();
+  const v1 = new THREE.Vector3();
+  const v2 = new THREE.Vector3();
+  const center = new THREE.Vector3();
+  const pinIndices = [];
+  const postIndices = [];
+
+  // Main 7-pin row sits near z ≈ -8; white H-posts sit by the side connector (x ≈ -15).
+  for (let i = 0; i < index.count; i += 3) {
+    const a = index.getX(i);
+    const b = index.getX(i + 1);
+    const c = index.getX(i + 2);
+    v0.fromBufferAttribute(position, a).applyMatrix4(source.matrixWorld);
+    v1.fromBufferAttribute(position, b).applyMatrix4(source.matrixWorld);
+    v2.fromBufferAttribute(position, c).applyMatrix4(source.matrixWorld);
+    center.copy(v0).add(v1).add(v2).multiplyScalar(1 / 3);
+    const isSidePost = center.x < -10 || center.z <= -12;
+    (isSidePost ? postIndices : pinIndices).push(a, b, c);
+  }
+
+  if (!pinIndices.length || !postIndices.length) {
+    source.parent.parent.attach(source);
+    return { pins: source, posts: null };
+  }
+
+  const postsGeometry = geometry.clone();
+  postsGeometry.setIndex(postIndices);
+  postsGeometry.computeVertexNormals();
+  const posts = new THREE.Mesh(postsGeometry, source.material);
+  posts.name = '_00_stackchan450_2_14_posts';
+  posts.position.copy(source.position);
+  posts.quaternion.copy(source.quaternion);
+  posts.scale.copy(source.scale);
+  source.parent.add(posts);
+
+  geometry.setIndex(pinIndices);
+  geometry.computeVertexNormals();
+
+  source.parent.parent.attach(source);
+  // Keep world pose, but parent under the side connector so they toggle/explode as one part.
+  if (sideConnector) sideConnector.attach(posts);
+  else source.parent.parent.attach(posts);
+
+  return { pins: source, posts };
+}
+
+function detachSevenPinHousing(source) {
+  if (!source?.isMesh || !source.geometry.index) return null;
+
+  const geometry = source.geometry;
+  const position = geometry.attributes.position;
+  const index = geometry.index;
+  const v0 = new THREE.Vector3();
+  const v1 = new THREE.Vector3();
+  const v2 = new THREE.Vector3();
+  const center = new THREE.Vector3();
+  const headerIndices = [];
+  const keepIndices = [];
+
+  for (let i = 0; i < index.count; i += 3) {
+    const a = index.getX(i);
+    const b = index.getX(i + 1);
+    const c = index.getX(i + 2);
+    v0.fromBufferAttribute(position, a).applyMatrix4(source.matrixWorld);
+    v1.fromBufferAttribute(position, b).applyMatrix4(source.matrixWorld);
+    v2.fromBufferAttribute(position, c).applyMatrix4(source.matrixWorld);
+    center.copy(v0).add(v1).add(v2).multiplyScalar(1 / 3);
+    // Dark metal shroud around the 7-pin row on the cavity shelf
+    const isHeader =
+      center.x > -6 && center.x < 6 &&
+      center.y > -32 && center.y < -22 &&
+      center.z > -12 && center.z < -4;
+    (isHeader ? headerIndices : keepIndices).push(a, b, c);
+  }
+
+  if (!headerIndices.length || !keepIndices.length) return null;
+
+  const headerGeometry = geometry.clone();
+  headerGeometry.setIndex(headerIndices);
+  headerGeometry.computeVertexNormals();
+  const header = new THREE.Mesh(headerGeometry, source.material);
+  header.name = '_00_stackchan450_2_1_header';
+  header.position.copy(source.position);
+  header.quaternion.copy(source.quaternion);
+  header.scale.copy(source.scale);
+  source.parent.add(header);
+  if (source.parent.parent) source.parent.parent.attach(header);
+
+  geometry.setIndex(keepIndices);
+  geometry.computeVertexNormals();
+  return header;
+}
+
 function prepareExplodedView() {
   model.updateMatrixWorld(true);
   const pinPart = detachPinkPins(model.getObjectByName('_00_stackchan450_1_3'));
@@ -471,6 +577,8 @@ function prepareExplodedView() {
   const frameRail = detachFrameRail(model.getObjectByName('_00_stackchan450_1_12'));
   const roundLight = detachRoundLight(model.getObjectByName('_00_stackchan450_1_14'));
   const sideConnector = detachSideConnector(model.getObjectByName('_00_stackchan450_2_11'));
+  detachSevenPinPins(model.getObjectByName('_00_stackchan450_2_14'), sideConnector);
+  const sevenPinHousing = detachSevenPinHousing(model.getObjectByName('_00_stackchan450_2_1'));
 
   const parts = [
     { name: '_00_stackchan450_1_8', direction: new THREE.Vector3(0, 0, 1), distance: 0.48 },
@@ -490,6 +598,8 @@ function prepareExplodedView() {
     { part: pinPart, direction: new THREE.Vector3(-1, 0, 0), distance: 0.32 },
     { name: '_00_stackchan450_2', direction: new THREE.Vector3(0, -1, 0), distance: 0.24 },
     { part: sideConnector, direction: new THREE.Vector3(0, -1, 0), distance: 0.40 },
+    { name: '_00_stackchan450_2_14', direction: new THREE.Vector3(0, -1, 0), distance: 0.40 },
+    { part: sevenPinHousing, direction: new THREE.Vector3(0, -1, 0), distance: 0.40 },
     { name: '_00_stackchan450_2_3', direction: new THREE.Vector3(0, -1, 0), distance: 0.40 },
     { name: '_00_stackchan450_3', direction: new THREE.Vector3(0, -1, 0), distance: 0.72 },
   ];
