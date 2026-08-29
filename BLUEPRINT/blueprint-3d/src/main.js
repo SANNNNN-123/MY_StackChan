@@ -116,6 +116,7 @@ const partCatalog = [
   },
   { label: 'Side bearing', name: '_00_stackchan450_1_15' },
   { label: 'Main body', name: '_00_stackchan450_2' },
+  { label: 'Black panel', name: '_00_stackchan450_2_1' },
   { label: 'Side connector', name: '_00_stackchan450_2_11' },
   { label: 'Left screw', name: '_00_stackchan450_2_2_left_screw' },
   {
@@ -478,6 +479,13 @@ function detachSideConnector(source) {
   return source;
 }
 
+function detachBlackPanel(source) {
+  // Remaining metal liner after 7-pin header cut — reads black (metalness 1, no env map)
+  if (!source?.parent?.parent) return null;
+  source.parent.parent.attach(source);
+  return source;
+}
+
 function detachSevenPinPins(source, sideConnector) {
   if (!source?.isMesh || !source.geometry.index || !source.parent?.parent) return null;
 
@@ -753,6 +761,7 @@ function prepareExplodedView() {
   const sideConnector = detachSideConnector(model.getObjectByName('_00_stackchan450_2_11'));
   detachSevenPinPins(model.getObjectByName('_00_stackchan450_2_14'), sideConnector);
   const sevenPinHousing = detachSevenPinHousing(model.getObjectByName('_00_stackchan450_2_1'));
+  const blackPanel = detachBlackPanel(model.getObjectByName('_00_stackchan450_2_1'));
   const leftScrew = detachLeftScrew(model.getObjectByName('_00_stackchan450_2_2'));
   const rightScrew = detachRightScrew(model.getObjectByName('_00_stackchan450_2_7'));
 
@@ -773,6 +782,14 @@ function prepareExplodedView() {
     { name: '_00_stackchan450_1_4', direction: new THREE.Vector3(-1, 0, 0), distance: 0.32 },
     { part: pinPart, direction: new THREE.Vector3(-1, 0, 0), distance: 0.32 },
     { name: '_00_stackchan450_2', direction: new THREE.Vector3(0, -1, 0), distance: 0.24 },
+    // −Z out of the shell; same Y as Main body so it stays level when the body drops
+    {
+      part: blackPanel,
+      directions: [
+        { direction: new THREE.Vector3(0, 0, -1), distance: 0.52 },
+        { direction: new THREE.Vector3(0, -1, 0), distance: 0.24 },
+      ],
+    },
     { part: sideConnector, direction: new THREE.Vector3(0, -1, 0), distance: 0.40 },
     // −X out from left wall; same Y as Main body so it stays level with the seat
     {
