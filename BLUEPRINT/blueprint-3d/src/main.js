@@ -111,6 +111,7 @@ const partCatalog = [
   },
   { label: 'Side bearing', name: '_00_stackchan450_1_15' },
   { label: 'Main body', name: '_00_stackchan450_2' },
+  { label: 'Side connector', name: '_00_stackchan450_2_11' },
   { label: 'Servo section', name: '_00_stackchan450_2_3' },
   { label: 'Base', name: '_00_stackchan450_3' },
 ];
@@ -457,12 +458,19 @@ function detachRoundLight(source) {
   return round;
 }
 
+function detachSideConnector(source) {
+  if (!source?.parent?.parent) return null;
+  source.parent.parent.attach(source);
+  return source;
+}
+
 function prepareExplodedView() {
   model.updateMatrixWorld(true);
   const pinPart = detachPinkPins(model.getObjectByName('_00_stackchan450_1_3'));
   const groupD = detachGroupDSlice(model.getObjectByName('_00_stackchan450_1_1'));
   const frameRail = detachFrameRail(model.getObjectByName('_00_stackchan450_1_12'));
   const roundLight = detachRoundLight(model.getObjectByName('_00_stackchan450_1_14'));
+  const sideConnector = detachSideConnector(model.getObjectByName('_00_stackchan450_2_11'));
 
   const parts = [
     { name: '_00_stackchan450_1_8', direction: new THREE.Vector3(0, 0, 1), distance: 0.48 },
@@ -481,6 +489,7 @@ function prepareExplodedView() {
     { name: '_00_stackchan450_1_4', direction: new THREE.Vector3(-1, 0, 0), distance: 0.32 },
     { part: pinPart, direction: new THREE.Vector3(-1, 0, 0), distance: 0.32 },
     { name: '_00_stackchan450_2', direction: new THREE.Vector3(0, -1, 0), distance: 0.24 },
+    { part: sideConnector, direction: new THREE.Vector3(0, -1, 0), distance: 0.40 },
     { name: '_00_stackchan450_2_3', direction: new THREE.Vector3(0, -1, 0), distance: 0.40 },
     { name: '_00_stackchan450_3', direction: new THREE.Vector3(0, -1, 0), distance: 0.72 },
   ];
