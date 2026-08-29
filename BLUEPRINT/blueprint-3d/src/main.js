@@ -106,6 +106,7 @@ const partCatalog = [
     '_00_stackchan450_1_12',
     '_00_stackchan450_1_12_rail',
     '_00_stackchan450_1_13',
+    '_00_stackchan450_1_9_pcb',
   ] },
   {
     label: 'Light guide bars',
@@ -375,6 +376,48 @@ function detachFrameRail(source) {
   geometry.setIndex(keepIndices);
   geometry.computeVertexNormals();
   return rail;
+}
+
+function detachPcbComponents(source) {
+  if (!source?.isMesh || !source.geometry.index) return null;
+
+  const geometry = source.geometry;
+  const position = geometry.attributes.position;
+  const index = geometry.index;
+  const v0 = new THREE.Vector3();
+  const v1 = new THREE.Vector3();
+  const v2 = new THREE.Vector3();
+  const center = new THREE.Vector3();
+  const pcbIndices = [];
+  const keepIndices = [];
+
+  // Black SMD / chip bodies sitting on the PCB plate (y ≈ 24); leave front scraps on 1_9
+  for (let i = 0; i < index.count; i += 3) {
+    const a = index.getX(i);
+    const b = index.getX(i + 1);
+    const c = index.getX(i + 2);
+    v0.fromBufferAttribute(position, a).applyMatrix4(source.matrixWorld);
+    v1.fromBufferAttribute(position, b).applyMatrix4(source.matrixWorld);
+    v2.fromBufferAttribute(position, c).applyMatrix4(source.matrixWorld);
+    center.copy(v0).add(v1).add(v2).multiplyScalar(1 / 3);
+    (center.y > 15 ? pcbIndices : keepIndices).push(a, b, c);
+  }
+
+  if (!pcbIndices.length || !keepIndices.length) return null;
+
+  const pcbGeometry = geometry.clone();
+  pcbGeometry.setIndex(pcbIndices);
+  pcbGeometry.computeVertexNormals();
+  const pcbParts = new THREE.Mesh(pcbGeometry, source.material);
+  pcbParts.name = '_00_stackchan450_1_9_pcb';
+  pcbParts.position.copy(source.position);
+  pcbParts.quaternion.copy(source.quaternion);
+  pcbParts.scale.copy(source.scale);
+  source.parent.add(pcbParts);
+
+  geometry.setIndex(keepIndices);
+  geometry.computeVertexNormals();
+  return pcbParts;
 }
 
 function detachRoundLight(source) {
@@ -935,6 +978,7 @@ function prepareExplodedView() {
   const pinPart = detachPinkPins(model.getObjectByName('_00_stackchan450_1_3'));
   const groupD = detachGroupDSlice(model.getObjectByName('_00_stackchan450_1_1'));
   const frameRail = detachFrameRail(model.getObjectByName('_00_stackchan450_1_12'));
+  const pcbComponents = detachPcbComponents(model.getObjectByName('_00_stackchan450_1_9'));
   const roundLight = detachRoundLight(model.getObjectByName('_00_stackchan450_1_14'));
   const sideConnector = detachSideConnector(model.getObjectByName('_00_stackchan450_2_11'));
   detachSevenPinPins(model.getObjectByName('_00_stackchan450_2_14'), sideConnector);
@@ -960,6 +1004,8 @@ function prepareExplodedView() {
     { name: '_00_stackchan450_1_10', direction: new THREE.Vector3(0, 0, -1), distance: 0.48 },
     { name: '_00_stackchan450_1_12', direction: new THREE.Vector3(0, 0, -1), distance: 0.48 },
     { name: '_00_stackchan450_1_13', direction: new THREE.Vector3(0, 0, -1), distance: 0.48 },
+    // Black PCB chips — same −Z as the PCB plate so they stay seated
+    { part: pcbComponents, direction: new THREE.Vector3(0, 0, -1), distance: 0.48 },
     { name: '_00_stackchan450_1_14', direction: new THREE.Vector3(0, 0, -1), distance: 0.92 },
     { part: roundLight, direction: new THREE.Vector3(0, 0, -1), distance: 0.92 },
     { name: '_00_stackchan450_1_15', direction: new THREE.Vector3(0, 0, -1), distance: 0.48 },
