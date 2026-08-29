@@ -117,6 +117,7 @@ const partCatalog = [
   { label: 'Side bearing', name: '_00_stackchan450_1_15' },
   { label: 'Main body', name: '_00_stackchan450_2' },
   { label: 'Black panel', name: '_00_stackchan450_2_1' },
+  { label: 'Panel screws', name: '_00_stackchan450_2_7_panel_screws' },
   { label: 'Side connector', name: '_00_stackchan450_2_11' },
   { label: 'Left screw', name: '_00_stackchan450_2_2_left_screw' },
   {
@@ -632,6 +633,53 @@ function detachRightScrew(source) {
   return screw;
 }
 
+function detachPanelScrews(source) {
+  if (!source?.isMesh || !source.geometry.index) return null;
+
+  const geometry = source.geometry;
+  const position = geometry.attributes.position;
+  const index = geometry.index;
+  const v0 = new THREE.Vector3();
+  const v1 = new THREE.Vector3();
+  const v2 = new THREE.Vector3();
+  const center = new THREE.Vector3();
+  const screwIndices = [];
+  const keepIndices = [];
+
+  // Pair of hex screws in the black-panel mounting tabs (x ≈ ±11, bottom rear)
+  for (let i = 0; i < index.count; i += 3) {
+    const a = index.getX(i);
+    const b = index.getX(i + 1);
+    const c = index.getX(i + 2);
+    v0.fromBufferAttribute(position, a).applyMatrix4(source.matrixWorld);
+    v1.fromBufferAttribute(position, b).applyMatrix4(source.matrixWorld);
+    v2.fromBufferAttribute(position, c).applyMatrix4(source.matrixWorld);
+    center.copy(v0).add(v1).add(v2).multiplyScalar(1 / 3);
+    const isPanelScrew =
+      Math.abs(Math.abs(center.x) - 11) < 2.5 &&
+      center.y > -31 && center.y < -25 &&
+      center.z > -41 && center.z < -35;
+    (isPanelScrew ? screwIndices : keepIndices).push(a, b, c);
+  }
+
+  if (!screwIndices.length || !keepIndices.length) return null;
+
+  const screwGeometry = geometry.clone();
+  screwGeometry.setIndex(screwIndices);
+  screwGeometry.computeVertexNormals();
+  const screws = new THREE.Mesh(screwGeometry, source.material);
+  screws.name = '_00_stackchan450_2_7_panel_screws';
+  screws.position.copy(source.position);
+  screws.quaternion.copy(source.quaternion);
+  screws.scale.copy(source.scale);
+  source.parent.add(screws);
+  if (source.parent.parent) source.parent.parent.attach(screws);
+
+  geometry.setIndex(keepIndices);
+  geometry.computeVertexNormals();
+  return screws;
+}
+
 function detachLeftScrew(source) {
   if (!source?.isMesh || !source.geometry.index) return null;
 
@@ -763,7 +811,9 @@ function prepareExplodedView() {
   const sevenPinHousing = detachSevenPinHousing(model.getObjectByName('_00_stackchan450_2_1'));
   const blackPanel = detachBlackPanel(model.getObjectByName('_00_stackchan450_2_1'));
   const leftScrew = detachLeftScrew(model.getObjectByName('_00_stackchan450_2_2'));
-  const rightScrew = detachRightScrew(model.getObjectByName('_00_stackchan450_2_7'));
+  const mesh27 = model.getObjectByName('_00_stackchan450_2_7');
+  const rightScrew = detachRightScrew(mesh27);
+  const panelScrews = detachPanelScrews(mesh27);
 
   const parts = [
     { name: '_00_stackchan450_1_8', direction: new THREE.Vector3(0, 0, 1), distance: 0.48 },
@@ -787,6 +837,14 @@ function prepareExplodedView() {
       part: blackPanel,
       directions: [
         { direction: new THREE.Vector3(0, 0, -1), distance: 0.52 },
+        { direction: new THREE.Vector3(0, -1, 0), distance: 0.24 },
+      ],
+    },
+    // Further −Z than the panel so they pull out of the tabs; same Y as Main body
+    {
+      part: panelScrews,
+      directions: [
+        { direction: new THREE.Vector3(0, 0, -1), distance: 0.72 },
         { direction: new THREE.Vector3(0, -1, 0), distance: 0.24 },
       ],
     },
