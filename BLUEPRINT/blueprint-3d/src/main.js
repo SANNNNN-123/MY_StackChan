@@ -152,6 +152,9 @@ scene.add(new THREE.HemisphereLight(0xbdd7cf, 0x111714, 2.1));
 const key = new THREE.DirectionalLight(0xffffff, 3);
 key.position.set(180, 220, 160);
 scene.add(key);
+const bounce = new THREE.DirectionalLight(0xffffff, 1.2);
+bounce.position.set(40, -220, 60);
+scene.add(bounce);
 
 let model;
 let exploded = false;
