@@ -133,6 +133,7 @@ const partCatalog = [
   { label: 'Base disc', name: '_00_stackchan450_3_3' },
   { label: 'USB-C port', name: '_00_stackchan450_3_5' },
   { label: 'Bottom plate', name: '_00_stackchan450_3_1_bottom' },
+  { label: 'Base screws', name: '_00_stackchan450_3_4_base_screws' },
 ];
 
 const viewport = document.querySelector('#viewport');
@@ -556,6 +557,58 @@ function detachBottomPlate(source) {
   return plate;
 }
 
+function detachBaseScrews(source) {
+  if (!source?.isMesh || !source.geometry.index) return null;
+
+  const geometry = source.geometry;
+  const position = geometry.attributes.position;
+  const index = geometry.index;
+  const v0 = new THREE.Vector3();
+  const v1 = new THREE.Vector3();
+  const v2 = new THREE.Vector3();
+  const center = new THREE.Vector3();
+  const screwIndices = [];
+  const keepIndices = [];
+
+  // Four ~3.4 mm corner fasteners (same size family as panel screws) in the base feet
+  const screwCenters = [
+    { x: -9, z: -35.87 },
+    { x: 9, z: -35.87 },
+    { x: -9, z: 8.13 },
+    { x: 9, z: 8.13 },
+  ];
+  for (let i = 0; i < index.count; i += 3) {
+    const a = index.getX(i);
+    const b = index.getX(i + 1);
+    const c = index.getX(i + 2);
+    v0.fromBufferAttribute(position, a).applyMatrix4(source.matrixWorld);
+    v1.fromBufferAttribute(position, b).applyMatrix4(source.matrixWorld);
+    v2.fromBufferAttribute(position, c).applyMatrix4(source.matrixWorld);
+    center.copy(v0).add(v1).add(v2).multiplyScalar(1 / 3);
+    const isBaseScrew = screwCenters.some(
+      p => Math.hypot(center.x - p.x, center.z - p.z) < 4.5,
+    );
+    (isBaseScrew ? screwIndices : keepIndices).push(a, b, c);
+  }
+
+  if (!screwIndices.length || !keepIndices.length) return null;
+
+  const screwGeometry = geometry.clone();
+  screwGeometry.setIndex(screwIndices);
+  screwGeometry.computeVertexNormals();
+  const screws = new THREE.Mesh(screwGeometry, source.material);
+  screws.name = '_00_stackchan450_3_4_base_screws';
+  screws.position.copy(source.position);
+  screws.quaternion.copy(source.quaternion);
+  screws.scale.copy(source.scale);
+  source.parent.add(screws);
+  if (source.parent.parent) source.parent.parent.attach(screws);
+
+  geometry.setIndex(keepIndices);
+  geometry.computeVertexNormals();
+  return screws;
+}
+
 function detachSevenPinPins(source, sideConnector) {
   if (!source?.isMesh || !source.geometry.index || !source.parent?.parent) return null;
 
@@ -882,6 +935,7 @@ function prepareExplodedView() {
   const baseDisc = detachBaseDisc(model.getObjectByName('_00_stackchan450_3_3'));
   const usbPort = detachUsbPort(model.getObjectByName('_00_stackchan450_3_5'));
   const bottomPlate = detachBottomPlate(model.getObjectByName('_00_stackchan450_3_1'));
+  const baseScrews = detachBaseScrews(model.getObjectByName('_00_stackchan450_3_4'));
   const leftScrew = detachLeftScrew(model.getObjectByName('_00_stackchan450_2_2'));
   const mesh27 = model.getObjectByName('_00_stackchan450_2_7');
   const rightScrew = detachRightScrew(mesh27);
@@ -945,6 +999,8 @@ function prepareExplodedView() {
     { name: '_00_stackchan450_3', direction: new THREE.Vector3(0, -1, 0), distance: 0.92 },
     // Underside plate — further −Y so it peels below the base
     { part: bottomPlate, direction: new THREE.Vector3(0, -1, 0), distance: 1.15 },
+    // Four corner base screws — further −Y than the bottom plate
+    { part: baseScrews, direction: new THREE.Vector3(0, -1, 0), distance: 1.38 },
     // USB-C out −Z from the base rear; same Y as Base so it stays level
     {
       part: usbPort,
