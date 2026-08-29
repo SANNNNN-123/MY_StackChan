@@ -132,6 +132,7 @@ const partCatalog = [
   { label: 'Base', name: '_00_stackchan450_3' },
   { label: 'Base disc', name: '_00_stackchan450_3_3' },
   { label: 'USB-C port', name: '_00_stackchan450_3_5' },
+  { label: 'Bottom plate', name: '_00_stackchan450_3_1_bottom' },
 ];
 
 const viewport = document.querySelector('#viewport');
@@ -503,6 +504,55 @@ function detachUsbPort(source) {
   return source;
 }
 
+function detachBottomPlate(source) {
+  if (!source?.isMesh || !source.geometry.index) return null;
+
+  const geometry = source.geometry;
+  const position = geometry.attributes.position;
+  const normal = geometry.attributes.normal;
+  const index = geometry.index;
+  const v0 = new THREE.Vector3();
+  const v1 = new THREE.Vector3();
+  const v2 = new THREE.Vector3();
+  const center = new THREE.Vector3();
+  const n = new THREE.Vector3();
+  const plateIndices = [];
+  const keepIndices = [];
+
+  // Underside floor of the base (BOTTOM view plate with M5 mark / mounting holes)
+  for (let i = 0; i < index.count; i += 3) {
+    const a = index.getX(i);
+    const b = index.getX(i + 1);
+    const c = index.getX(i + 2);
+    v0.fromBufferAttribute(position, a).applyMatrix4(source.matrixWorld);
+    v1.fromBufferAttribute(position, b).applyMatrix4(source.matrixWorld);
+    v2.fromBufferAttribute(position, c).applyMatrix4(source.matrixWorld);
+    center.copy(v0).add(v1).add(v2).multiplyScalar(1 / 3);
+    n.fromBufferAttribute(normal, a).transformDirection(source.matrixWorld).normalize();
+    const isPlate =
+      center.y < -41.8 &&
+      (n.y < -0.35 || center.y < -42.7);
+    (isPlate ? plateIndices : keepIndices).push(a, b, c);
+  }
+
+  if (!plateIndices.length || !keepIndices.length) return null;
+
+  const plateGeometry = geometry.clone();
+  plateGeometry.setIndex(plateIndices);
+  plateGeometry.computeVertexNormals();
+  const plate = new THREE.Mesh(plateGeometry, source.material);
+  plate.name = '_00_stackchan450_3_1_bottom';
+  plate.position.copy(source.position);
+  plate.quaternion.copy(source.quaternion);
+  plate.scale.copy(source.scale);
+  source.parent.add(plate);
+  if (source.parent.parent) source.parent.parent.attach(plate);
+
+  geometry.setIndex(keepIndices);
+  geometry.computeVertexNormals();
+  return plate;
+}
+
 function detachSevenPinPins(source, sideConnector) {
   if (!source?.isMesh || !source.geometry.index || !source.parent?.parent) return null;
 
@@ -828,6 +878,7 @@ function prepareExplodedView() {
   const blackPanel = detachBlackPanel(model.getObjectByName('_00_stackchan450_2_1'));
   const baseDisc = detachBaseDisc(model.getObjectByName('_00_stackchan450_3_3'));
   const usbPort = detachUsbPort(model.getObjectByName('_00_stackchan450_3_5'));
+  const bottomPlate = detachBottomPlate(model.getObjectByName('_00_stackchan450_3_1'));
   const leftScrew = detachLeftScrew(model.getObjectByName('_00_stackchan450_2_2'));
   const mesh27 = model.getObjectByName('_00_stackchan450_2_7');
   const rightScrew = detachRightScrew(mesh27);
@@ -889,6 +940,8 @@ function prepareExplodedView() {
     // Between servo (−Y 0.40) and base (−Y 0.92)
     { part: baseDisc, direction: new THREE.Vector3(0, -1, 0), distance: 0.75 },
     { name: '_00_stackchan450_3', direction: new THREE.Vector3(0, -1, 0), distance: 0.92 },
+    // Underside plate — further −Y so it peels below the base
+    { part: bottomPlate, direction: new THREE.Vector3(0, -1, 0), distance: 1.15 },
     // USB-C out −Z from the base rear; same Y as Base so it stays level
     {
       part: usbPort,
