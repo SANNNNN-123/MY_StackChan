@@ -1167,6 +1167,11 @@ resize();
 new GLTFLoader().load('/models/stackchan/stack_chan_model.glb', gltf => {
   model = gltf.scene;
   model.rotation.x = -Math.PI / 2;
+
+  // Drop export placeholder plane (1×1 gray quad at origin, not a StackChan part)
+  const dummyPlane = model.getObjectByName('plane');
+  dummyPlane?.parent?.remove(dummyPlane);
+
   scene.add(model);
 
   let meshes = 0;
