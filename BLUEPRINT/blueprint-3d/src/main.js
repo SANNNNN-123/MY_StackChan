@@ -131,6 +131,7 @@ const partCatalog = [
   { label: 'Servo section', name: '_00_stackchan450_2_3' },
   { label: 'Base', name: '_00_stackchan450_3' },
   { label: 'Base disc', name: '_00_stackchan450_3_3' },
+  { label: 'USB-C port', name: '_00_stackchan450_3_5' },
 ];
 
 const viewport = document.querySelector('#viewport');
@@ -495,6 +496,13 @@ function detachBaseDisc(source) {
   return source;
 }
 
+function detachUsbPort(source) {
+  // Rear USB-C shell on the base (`_00_stackchan450_3_5`) — metal, reads black
+  if (!source?.parent?.parent) return null;
+  source.parent.parent.attach(source);
+  return source;
+}
+
 function detachSevenPinPins(source, sideConnector) {
   if (!source?.isMesh || !source.geometry.index || !source.parent?.parent) return null;
 
@@ -819,6 +827,7 @@ function prepareExplodedView() {
   const sevenPinHousing = detachSevenPinHousing(model.getObjectByName('_00_stackchan450_2_1'));
   const blackPanel = detachBlackPanel(model.getObjectByName('_00_stackchan450_2_1'));
   const baseDisc = detachBaseDisc(model.getObjectByName('_00_stackchan450_3_3'));
+  const usbPort = detachUsbPort(model.getObjectByName('_00_stackchan450_3_5'));
   const leftScrew = detachLeftScrew(model.getObjectByName('_00_stackchan450_2_2'));
   const mesh27 = model.getObjectByName('_00_stackchan450_2_7');
   const rightScrew = detachRightScrew(mesh27);
@@ -880,6 +889,14 @@ function prepareExplodedView() {
     // Between servo (−Y 0.40) and base (−Y 0.92)
     { part: baseDisc, direction: new THREE.Vector3(0, -1, 0), distance: 0.75 },
     { name: '_00_stackchan450_3', direction: new THREE.Vector3(0, -1, 0), distance: 0.92 },
+    // USB-C out −Z from the base rear; same Y as Base so it stays level
+    {
+      part: usbPort,
+      directions: [
+        { direction: new THREE.Vector3(0, 0, -1), distance: 0.40 },
+        { direction: new THREE.Vector3(0, -1, 0), distance: 0.92 },
+      ],
+    },
   ];
 
   const size = new THREE.Box3().setFromObject(model).getSize(new THREE.Vector3()).length();
